@@ -62,7 +62,9 @@ hosted version behaves.)
    - **⌘Z** undo, **⇧⌘Z** redo, **Delete** hides the selected callout.
    - **Scroll** over the photo to zoom (never smaller than the whole photo);
      drag an empty spot to move around; double-click to fit.
-   - **Lot lines:** Style → Lot lines → Set up. Found automatically
+   - **Lot lines:** Style → Lot lines → Add lot lines to this photo. Each
+     photo has its own outline (or none); "Copy from …" starts from another
+     photo's outline without linking them. Found automatically
      anywhere in Texas from the statewide appraisal-district parcel map
      (TxGIO StratMap), with Denton, Collin, Tarrant and Dallas county maps
      as backups. Or **Draw lot lines by hand** by clicking the corners;
@@ -75,6 +77,14 @@ hosted version behaves.)
      the browser), **Brush** (`[` `]` change size), **Box**, **Straight
      lines** (click corners, Enter closes). **Shift** adds, **Alt**
      removes, hold **Space** to move around. Callouts always stay in front.
+     Marks are **On the property** (red) or **Off the property** (blue,
+     press **X** to switch).
+   - **Color callout** (Lot lines → tick it): the lot stays in color and the
+     rest of the photo goes gray, with the lines or without. The sky stays
+     blue (found from the camera angle; "Move the sky line" fine-tunes it).
+     Mask marks on the property stay in color (a roof poking past the lot);
+     marks off the property go gray (a neighbor's tree inside the lot).
+     "How gray" and "Darken surroundings" are saved with presets.
    - **Disclaimers** (Style tab): the lot-lines note and an optional school
      note ("Buyer to verify school assignment") stack in one corner.
 5. **Export this photo** or **Export all** (a .zip for several photos).

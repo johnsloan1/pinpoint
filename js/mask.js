@@ -82,6 +82,46 @@
     return true;
   };
 
+  // A mask holds two kinds of marks: white = on the property (stays in color
+  // with a color callout), blue = off the property (goes gray). Both pass
+  // in front of the lot lines. Older masks are all white.
+  const OFF = '#0000ff', ON = '#ffffff';
+  const isOff = (r, g, b) => b > r + 60;
+  const splits = new WeakMap();
+  function split(mask, ver) {
+    const s = splits.get(mask);
+    if (s && s.ver === ver) return s;
+    const w = mask.width, h = mask.height;
+    const d = mask.getContext('2d').getImageData(0, 0, w, h).data;
+    const on = new ImageData(w, h), off = new ImageData(w, h);
+    let anyOn = false, anyOff = false;
+    for (let i = 0; i < d.length; i += 4) {
+      const a = d[i + 3];
+      if (!a) continue;
+      const t = isOff(d[i], d[i + 1], d[i + 2]) ? off : on;
+      t.data[i] = t.data[i + 1] = t.data[i + 2] = 255; t.data[i + 3] = a;
+      if (t === on) anyOn = true; else anyOff = true;
+    }
+    const mk = (img) => { const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').putImageData(img, 0, 0); return c; };
+    const r = { ver, on: anyOn ? mk(on) : null, off: anyOff ? mk(off) : null };
+    splits.set(mask, r);
+    return r;
+  }
+  // See-through view of both kinds while editing (red = on, blue = off).
+  function tint2(mask) {
+    const w = mask.width, h = mask.height;
+    const d = mask.getContext('2d').getImageData(0, 0, w, h).data;
+    const out = new ImageData(w, h), o = out.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (!d[i + 3]) continue;
+      const off = isOff(d[i], d[i + 1], d[i + 2]);
+      o[i] = off ? 60 : 255; o[i + 1] = off ? 130 : 70; o[i + 2] = off ? 255 : 70; o[i + 3] = d[i + 3] * 0.45;
+    }
+    const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').putImageData(out, 0, 0);
+    return c;
+  }
+  const TINT = { on: 'rgba(255,70,70,0.45)', off: 'rgba(60,130,255,0.45)' };
+
   // ---------- Smart select (Segment Anything) ----------
   const LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1';
   const MODEL = 'Xenova/slimsam-77-uniform';
@@ -153,5 +193,5 @@
     return c;
   }
 
-  DT.mask = { maskSize, blank, copy, fromData, load, remember, tint, isEmpty, loadSam, prepare, segment };
+  DT.mask = { ON, OFF, TINT, split, tint2, maskSize, blank, copy, fromData, load, remember, tint, isEmpty, loadSam, prepare, segment };
 })(window.DT = window.DT || {});

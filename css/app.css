@@ -304,3 +304,9 @@ body.dropping .canvas-wrap { outline: 3px dashed var(--accent); outline-offset: 
 .empty-actions { display: flex; gap: 10px; justify-content: center; margin: 18px 0 10px; }
 .btn.big { padding: 10px 22px; font-size: 15px; font-weight: 700; border-radius: 10px; }
 .empty-card .btn.subtle { margin-bottom: 14px; }
+
+/* Color callout options (indented under the checkbox) */
+.sub-fields { margin: 2px 0 10px 22px; padding-left: 10px; border-left: 2px solid var(--line); }
+/* Mask: on / off the property */
+.mask-bar .seg.kind button.active { background: #ef4444; color: #fff; }
+.mask-bar .seg.kind button.active.off { background: #3b82f6; color: #fff; }

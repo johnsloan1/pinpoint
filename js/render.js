@@ -205,13 +205,108 @@
     return cv;
   }
 
+  // ---- Color callout: property in color, everything else gray ----
+  // Black-and-white copy of a photo (made once per photo and size).
+  const grayCache = new WeakMap();
+  function grayOf(image, w, h) {
+    const c = grayCache.get(image);
+    if (c && c.width === w) return c;
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const x = cv.getContext('2d', { willReadFrequently: true });
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(image, 0, 0, w, h);
+    const id = x.getImageData(0, 0, w, h), d = id.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+    x.putImageData(id, 0, 0);
+    grayCache.set(image, cv);
+    return cv;
+  }
+  // The photo with the color callout applied. Kept in color: inside the lot,
+  // the sky, and mask parts marked "on the property". Gray: everything else,
+  // plus mask parts marked "off the property" (even inside the lot).
+  const popCache = new WeakMap();
+  function popImage(image, scene, mask, maskVer, maxW) {
+    const { W, H, lot, pop } = scene;
+    const w = Math.min(image.width, maxW || image.width), k = w / W, h = Math.round(H * k);
+    const key = [w, pop.gray, pop.dark, JSON.stringify(pop.sky && pop.sky.map(p => Math.round(p.y))),
+      lot.map(p => Math.round(p.x) + ',' + Math.round(p.y)).join(' '), mask ? maskVer : 'none'].join('|');
+    const c = popCache.get(image);
+    if (c && c.key === key && (!mask || c.mask === mask)) return c.canvas;
+    const g = grayOf(image, w, h);
+    const parts = mask ? DT.mask.split(mask, maskVer) : null;
+    // Layer of gray-ness, then cut holes where color shows through.
+    const L = document.createElement('canvas');
+    L.width = w; L.height = h;
+    const x = L.getContext('2d');
+    x.drawImage(g, 0, 0);
+    if (pop.dark > 0) { x.fillStyle = `rgba(0,0,0,${pop.dark})`; x.fillRect(0, 0, w, h); }
+    const grayDone = parts && parts.off ? copyCanvas(L) : null; // for "off the property" bits
+    x.globalCompositeOperation = 'destination-out';
+    x.beginPath();
+    lot.forEach((p, i) => i ? x.lineTo(p.x * k, p.y * k) : x.moveTo(p.x * k, p.y * k));
+    x.closePath();
+    x.fill();
+    if (pop.sky) {
+      // Above the horizon, with a soft edge a few pixels tall.
+      const [a, b] = pop.sky.map(p => ({ x: p.x * k, y: p.y * k }));
+      const f = Math.max(2, h * 0.004);
+      const nx = -(b.y - a.y), ny = b.x - a.x, nl = Math.hypot(nx, ny) || 1; // points down the photo
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      const gr = x.createLinearGradient(mx - nx / nl * f, my - ny / nl * f, mx + nx / nl * f, my + ny / nl * f);
+      gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      x.fillStyle = gr;
+      const big = (w + h) * 4;
+      x.beginPath();
+      x.moveTo(a.x - nx / nl * big - (b.x - a.x) * 4, a.y - ny / nl * big - (b.y - a.y) * 4);
+      x.lineTo(a.x + nx / nl * f - (b.x - a.x) * 4, a.y + ny / nl * f - (b.y - a.y) * 4);
+      x.lineTo(b.x + nx / nl * f + (b.x - a.x) * 4, b.y + ny / nl * f + (b.y - a.y) * 4);
+      x.lineTo(b.x - nx / nl * big + (b.x - a.x) * 4, b.y - ny / nl * big + (b.y - a.y) * 4);
+      x.closePath();
+      x.fill();
+    }
+    if (parts && parts.on) x.drawImage(parts.on, 0, 0, w, h);
+    if (grayDone) {
+      const t = document.createElement('canvas');
+      t.width = w; t.height = h;
+      const tx = t.getContext('2d');
+      tx.drawImage(parts.off, 0, 0, w, h);
+      tx.globalCompositeOperation = 'source-in';
+      tx.drawImage(grayDone, 0, 0);
+      x.globalCompositeOperation = 'source-over';
+      x.drawImage(t, 0, 0);
+    }
+    const out = (c && c.canvas) || document.createElement('canvas');
+    out.width = w; out.height = h;
+    const o = out.getContext('2d');
+    o.drawImage(image, 0, 0, w, h);
+    o.globalAlpha = pop.gray;
+    o.drawImage(L, 0, 0);
+    o.globalAlpha = 1;
+    out._ver = key;
+    popCache.set(image, { key, mask, canvas: out });
+    return out;
+  }
+  function copyCanvas(src) {
+    const c = document.createElement('canvas');
+    c.width = src.width; c.height = src.height;
+    c.getContext('2d').drawImage(src, 0, 0);
+    return c;
+  }
+
   // Draw everything. scene comes from main.js (positions in photo pixels).
   function drawScene(ctx, scene, image, opts = {}) {
     const { W, H, style, items } = scene;
     const u = unit(W);
-    if (image) ctx.drawImage(image, 0, 0, W, H);
-    if (scene.lot) drawLot(ctx, scene.lot, style, u);
-    if (scene.lot && image && opts.lotMask) ctx.drawImage(maskedPhoto(image, opts.lotMask, opts.lotMaskVer || 0), 0, 0, W, H);
+    const base = image && scene.pop && scene.lot ? popImage(image, scene, opts.lotMask, opts.lotMaskVer || 0, opts.popMaxW) : image;
+    if (base) ctx.drawImage(base, 0, 0, W, H);
+    if (scene.lot && scene.lotLines) {
+      drawLot(ctx, scene.lot, style, u);
+      if (base && opts.lotMask) ctx.drawImage(maskedPhoto(base, opts.lotMask, (opts.lotMaskVer || 0) + '|' + (base._ver || '')), 0, 0, W, H);
+    }
     // While editing a mask: show it (and the smart-select guess) tinted.
     if (opts.maskTint) ctx.drawImage(opts.maskTint, 0, 0, W, H);
     if (opts.maskPreview) ctx.drawImage(opts.maskPreview, 0, 0, W, H);
@@ -220,6 +315,7 @@
     if (scene.house && style.showPin) drawPin(ctx, scene.house.x, scene.house.y, style, u);
     for (const it of items) drawBox(ctx, it, style, u, opts.logoImages || new Map());
     if (scene.notes && scene.notes.length) drawNotes(ctx, scene.notes, style, W, H, u);
+    if (opts.lotHandles && scene.lot && !scene.lotLines) drawLotGuide(ctx, scene.lot, opts.handleR || 7 * u);
     if (opts.lotHandles && scene.lot) drawLotHandles(ctx, scene.lot, opts.handleR || 7 * u, opts.lotSel);
     if (opts.drawPts && opts.drawPts.length) drawDraft(ctx, opts.drawPts, opts.handleR || 7 * u);
 
@@ -346,6 +442,15 @@
       ctx.beginPath(); ctx.arc(p.x, p.y, on ? r * 1.25 : r, 0, Math.PI * 2);
       ctx.fillStyle = on ? '#f97316' : '#ffffff'; ctx.fill(); ctx.strokeStyle = on ? '#ffffff' : '#38bdf8'; ctx.stroke();
     });
+    ctx.restore();
+  }
+  // While editing with the lines turned off: a faint outline to work with.
+  function drawLotGuide(ctx, pts, r) {
+    ctx.save();
+    ctx.beginPath();
+    pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.closePath();
+    ctx.setLineDash([r, r * 0.8]); ctx.lineWidth = r * 0.3; ctx.strokeStyle = 'rgba(56,189,248,0.8)'; ctx.stroke();
     ctx.restore();
   }
   function drawDraft(ctx, pts, r) {

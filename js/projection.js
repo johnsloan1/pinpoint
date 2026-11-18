@@ -108,6 +108,23 @@
     return { lat, lon };
   }
 
+  // Where the horizon crosses the photo's left and right edges (pixels), or
+  // null when the camera points too far down to see it. Everything above
+  // this line is sky.
+  function horizon(cam) {
+    if (!(cam.up[2] > 1e-3)) return null;
+    const dip = Math.sqrt(2 * Math.max(cam.h, 1) * (1 - REFRACTION) / R); // the horizon sits a hair below level
+    const at = (px) => {
+      const xn = (px - cam.cx) / cam.fpx;
+      let yn = 0;
+      for (let k = 0; k < 3; k++) yn = (-Math.sin(dip) * Math.hypot(1, xn, yn) - cam.fwd[2] - cam.right[2] * xn) / cam.up[2];
+      return cam.cy - cam.fpx * yn;
+    };
+    const y0 = at(0), y1 = at(cam.W);
+    if (y0 < 0 && y1 < 0) return null; // above the top of the photo
+    return [{ x: 0, y: y0 }, { x: cam.W, y: y1 }];
+  }
+
   // Nudge two camera settings so a known real-world point lands on a
   // target pixel (used for "line everything up with the house pin").
   function solveAlign(photo, house, target, keys) {
@@ -211,5 +228,5 @@
     return M.map((row, i) => row[n] / row[i]);
   }
 
-  DT.projection = { buildCamera, baseYaw, headingGap, solveFit, project, unproject, inFrame, distM, offset, enu, fromEnu, solveAlign, isManual };
+  DT.projection = { horizon, buildCamera, baseYaw, headingGap, solveFit, project, unproject, inFrame, distM, offset, enu, fromEnu, solveAlign, isManual };
 })(window.DT = window.DT || {});

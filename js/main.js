@@ -23,7 +23,7 @@
     showPin: true, pinColor: '#e11d48', pinSize: 62,
     showDrive: false, driveMode: 'both',
     schoolNote: false, schoolNoteText: SCHOOL_NOTE_TEXT, schoolNoteSize: 10, schoolNotePos: 'bottom-right',
-    showLot: false, lotColor: '#ffffff', lotWidth: 2.5, lotFill: 0, lotDash: 'solid', lotNote: true, lotNoteText: LOT_NOTE_TEXT,
+    showLot: false, lotColor: '#ffffff', lotWidth: 2.5, lotFill: 0, lotDash: 'solid', lotNote: true, lotNoteText: LOT_NOTE_TEXT, popGray: 1, popDark: 0, popSky: true,
   };
 
   const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -46,6 +46,8 @@
   const measureCtx = document.createElement('canvas').getContext('2d');
 
   const photo = () => S.photos[cur];
+  // Lot lines belong to one photo each (not shared across the property).
+  const curLot = () => { const p = S.photos[cur]; return (p && p.lot) || null; };
   // Eye-level photos (not from a drone, or no GPS / camera direction) get no
   // camera math at all: no automatic callouts and no warnings. You tick the
   // places you want and drag them into position yourself.
@@ -181,7 +183,6 @@
     S.fetched = S.fetched || { lat: S.house.lat, lon: S.house.lon, radii: {} };
     mergeMyPlaces();
     await fetchPlaces();
-    if (S.style.showLot && !S.lot) autoFindLot();
     const h = jobHint(S);
     if (h) setStatus(h);
   }
@@ -510,11 +511,10 @@
       for (const p of S.photos) p.house = null;
       for (const p of Object.values(S.places)) if (p.lat != null) p.distMi = PJ.distM(g.lat, g.lon, p.lat, p.lon) / MI;
       if (moved || !S.fetched) S.fetched = { lat: g.lat, lon: g.lon, radii: {} };
-      if (moved) S.lot = null;
+      if (moved) for (const p of S.photos) delete p.lot; // outlines were for the old address
       mergeMyPlaces();
       busy(null);
       await fetchPlaces();
-      if (S.style.showLot && !S.lot) autoFindLot();
     } catch (e) {
       console.error(e);
       setStatus('Lookup failed: ' + e.message + '. Check your internet connection and try again.', 'error');
@@ -654,6 +654,11 @@
   const MERGED_INTO = Object.fromEntries(Object.entries(PL.MERGED).map(([k, v]) => [k, v[0]]));
   const RENAMED = { golf: ['Golf courses'], civic: ['City & town halls'], shopping: ['Shopping & retail'] };
   function migrate() {
+    // Lot lines used to be shared by every photo of a property (Nov 2026).
+    if (S.lot) {
+      if (S.style.showLot) for (const p of S.photos) if (!p.ground && !p.lot) p.lot = clone(S.lot);
+      delete S.lot;
+    }
     for (const [from, to] of Object.entries(MERGED_INTO)) {
       const a = S.categories.find(c => c.id === from), b = catById(to);
       if (a && b && a.used !== false) { b.used = true; if (a.enabled) b.enabled = true; }
@@ -764,22 +769,31 @@
     if (house && S.style.showPin) obstacles.push(RD.pinGeometry(house.x, house.y, S.style, u).rect);
     // Lot lines: the outline's corners are real-world points, so they land
     // in the right place on every photo.
-    let lot = null;
-    if (S.style.showLot && S.lot && S.lot.ring && S.lot.ring.length >= 3 && cam) {
-      const pts = S.lot.ring.map(([la, lo]) => PJ.project(cam, la, lo));
+    // Each photo has its own outline (or none).
+    let lot = null, lotLines = false, pop = null;
+    const L = ph.lot;
+    if (L && L.ring && L.ring.length >= 3 && cam) {
+      const pts = L.ring.map(([la, lo]) => PJ.project(cam, la, lo));
       // r[2] = 1 means "no line from this corner to the next" (a deleted side).
-      if (pts.every(Boolean)) lot = pts.map((p, i) => ({ x: p.x, y: p.y, gap: !!S.lot.ring[i][2] }));
+      if (pts.every(Boolean)) lot = pts.map((p, i) => ({ x: p.x, y: p.y, gap: !!L.ring[i][2] }));
+      lotLines = !!lot && L.lines !== false;
+      // Color callout: the property stays in color, the rest goes gray.
+      if (lot && L.pop) {
+        let sky = S.style.popSky !== false ? PJ.horizon(cam) : null;
+        if (sky && L.sky) sky = sky.map(p => ({ x: p.x, y: p.y + L.sky * H }));
+        pop = { gray: S.style.popGray ?? 1, dark: S.style.popDark || 0, sky };
+      }
     }
     // Disclaimers, stacked in one corner. The school one only appears on
     // photos that show a school callout.
     const notes = [];
-    if (lot && S.style.lotNote !== false) notes.push((S.style.lotNoteText ?? LOT_NOTE_TEXT).trim());
+    if ((lotLines || pop) && S.style.lotNote !== false) notes.push((S.style.lotNoteText ?? LOT_NOTE_TEXT).trim());
     if (S.style.schoolNote && raw.some(r => SCHOOL_CATS.includes(r.cat.id))) notes.push((S.style.schoolNoteText || SCHOOL_NOTE_TEXT).trim());
     const noteLines = notes.filter(Boolean);
     obstacles.push(...RD.notesGeometry(measureCtx, noteLines, S.style, W, H, u));
     const boxes = LY.autoLayout(items, { W, H, leader: S.style.leader * u, pad: 7 * u, dotR: (S.style.dotSize + 3) * u, obstacles });
     for (const it of items) it.box = boxes[it.id];
-    return { W, H, style: S.style, items, house, cam, listed, beyond, notes: noteLines, lot };
+    return { W, H, style: S.style, items, house, cam, listed, beyond, notes: noteLines, lot, lotLines, pop };
   }
 
   // ---------------- Canvas ----------------
@@ -857,9 +871,9 @@
     const lm = masking ? maskEd.canvas : DT.mask.fromData(ph.lotMask, redraw);
     RD.drawScene(ctx, scene, a && a.bitmap, { selectedId: masking ? null : selectedId, logoImages,
       lotHandles: !masking && sel && sel.kind === 'lot', lotSel: sel && sel.kind === 'lot' ? sel : null, handleR: 7 / zoomScale(), drawPts: mode === 'drawLot' ? drawPts : null,
-      lotMask: lm, lotMaskVer: masking ? maskEd.savedVer : 0,
-      maskTint: masking && maskEd.show ? DT.mask.tint(maskEd.canvas, 'rgba(255,70,70,0.42)', maskEd.ver) : null,
-      maskPreview: masking && maskEd.preview ? DT.mask.tint(maskEd.preview.canvas, maskEd.preview.op === 'remove' ? 'rgba(255,200,0,0.45)' : 'rgba(56,189,248,0.5)', maskEd.preview.id) : null });
+      lotMask: lm, lotMaskVer: masking ? maskEd.savedVer : 0, popMaxW: 2400,
+      maskTint: masking && maskEd.show ? maskEd.tint : null,
+      maskPreview: masking && maskEd.preview ? DT.mask.tint(maskEd.preview.canvas, maskEd.preview.op === 'remove' ? 'rgba(255,200,0,0.45)' : maskEd.kind === 'off' ? 'rgba(60,130,255,0.55)' : 'rgba(56,189,248,0.5)', maskEd.preview.id + maskEd.kind) : null });
     if (masking) drawMaskOverlay();
     ctx.restore();
     if (editingLot) {
@@ -950,8 +964,8 @@
     const hit = hitTest(pt);
     if (hit && (hit.type === 'lotVertex' || hit.type === 'lotMid')) {
       if (hit.type === 'lotMid') {
-        const a = S.lot.ring[hit.i], b = S.lot.ring[(hit.i + 1) % S.lot.ring.length];
-        S.lot.ring.splice(hit.i + 1, 0, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+        const a = curLot().ring[hit.i], b = curLot().ring[(hit.i + 1) % curLot().ring.length];
+        curLot().ring.splice(hit.i + 1, 0, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
         hit.i++;
         sel = { kind: 'lot' };
       }
@@ -990,7 +1004,7 @@
       if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 3) return;
       drag.moved = true;
       const ll = drag.cam && PJ.unproject(drag.cam, pt.x, pt.y);
-      if (ll) { const g = S.lot.ring[drag.lot][2]; S.lot.ring[drag.lot] = g ? [ll.lat, ll.lon, g] : [ll.lat, ll.lon]; S.lot.edited = true; }
+      if (ll) { const g = curLot().ring[drag.lot][2]; curLot().ring[drag.lot] = g ? [ll.lat, ll.lon, g] : [ll.lat, ll.lon]; curLot().edited = true; }
       redraw();
       return;
     }
@@ -1071,7 +1085,7 @@
     if (mode === 'mask') { if (maskEd && maskEd.tool === 'line') maskClosePoly(); return; }
     const hit = hitTest(toImage(e));
     if (hit && hit.type === 'lotVertex') {
-      if (S.lot.ring.length > 3) { S.lot.ring.splice(hit.i, 1); S.lot.edited = true; commit(); redraw(); renderInspector(); }
+      if (curLot().ring.length > 3) { curLot().ring.splice(hit.i, 1); curLot().edited = true; commit(); redraw(); renderInspector(); }
       return;
     }
     if (!hit) resetZoom();
@@ -1083,6 +1097,8 @@
   async function autoFindLot(useLatLon) {
     const at = useLatLon || (S.house && { lat: S.house.lat, lon: S.house.lon });
     if (!at || lotBusy) { if (!at) setStatus('Find the address first, then lot lines can be looked up.', 'error'); return; }
+    const ph = photo();
+    if (!ph || !camFor(ph)) { setStatus('Lot lines need a drone photo. Pick one in the strip below.', 'error'); return; }
     lotBusy = true;
     setStatus('Looking up the lot lines…');
     try {
@@ -1091,10 +1107,10 @@
         setStatus(`No lot lines found here. The automatic lookup covers ${PL.LOT_COVERAGE}. Use “Draw lot lines by hand”.`, 'error');
         return;
       }
-      S.lot = lot;
-      S.style.showLot = true;
+      const old = ph.lot;
+      ph.lot = { ...lot, lines: old ? old.lines !== false : true, pop: !!(old && old.pop), sky: old && old.sky };
       commit();
-      select({ kind: 'lot' });
+      if (photo() === ph) select({ kind: 'lot' });
       const ac = lot.acres || lotAcres();
       setStatus(`Lot lines found (${lot.source}${ac ? ', about ' + ac.toFixed(2) + ' acres' : ''}).${lot.nearby ? ' The address point was just off the lot, so the nearest lot was used: check it’s the right one.' : ''} Drag the corners to adjust.`, 'ok');
     } finally { lotBusy = false; }
@@ -1124,32 +1140,32 @@
     drawPts = [];
     endMode();
     if (pts.length < 3) { setStatus('A lot needs at least 3 corners. Try again.', 'error'); redraw(); return; }
-    S.lot = { ring: pts.map(p => p.ll), source: 'drawn by hand', acres: null, edited: true };
-    S.style.showLot = true;
+    const ph = photo(), old = ph.lot;
+    ph.lot = { ring: pts.map(p => p.ll), source: 'drawn by hand', acres: null, edited: true, lines: old ? old.lines !== false : true, pop: !!(old && old.pop), sky: old && old.sky };
     commit();
     select({ kind: 'lot' });
   }
   function deleteLotCorner(i) {
-    if (!S.lot || !S.lot.ring[i]) return;
-    if (S.lot.ring.length <= 3) { setStatus('A lot needs at least 3 corners. Use “Remove lot lines” to delete the whole outline.', 'error'); return; }
-    S.lot.ring.splice(i, 1);
-    S.lot.edited = true;
+    if (!curLot() || !curLot().ring[i]) return;
+    if (curLot().ring.length <= 3) { setStatus('A lot needs at least 3 corners. Use “Remove lot lines” to delete the whole outline.', 'error'); return; }
+    curLot().ring.splice(i, 1);
+    curLot().edited = true;
     commit();
     select({ kind: 'lot' });
   }
   // Delete (or bring back) the side from corner i to the next corner.
   function toggleLotSide(i) {
-    const r = S.lot && S.lot.ring[i];
+    const r = curLot() && curLot().ring[i];
     if (!r) return;
     if (r[2]) r.length = 2; else r[2] = 1;
-    if (S.lot.ring.every(c => c[2])) { r.length = 2; setStatus('At least one side has to stay. Use “Remove lot lines” to delete the whole outline.', 'error'); return; }
-    S.lot.edited = true;
+    if (curLot().ring.every(c => c[2])) { r.length = 2; setStatus('At least one side has to stay. Use “Remove lot lines” to delete the whole outline.', 'error'); return; }
+    curLot().edited = true;
     commit();
     select({ kind: 'lot', edge: i });
   }
   function lotAcres() {
-    if (!S.lot) return null;
-    const r = S.lot.ring, lat0 = r[0][0], lon0 = r[0][1];
+    if (!curLot()) return null;
+    const r = curLot().ring, lat0 = r[0][0], lon0 = r[0][1];
     let a = 0;
     for (let i = 0; i < r.length; i++) {
       const [x1, y1] = PJ.enu(lat0, lon0, r[i][0], r[i][1]), [x2, y2] = PJ.enu(lat0, lon0, r[(i + 1) % r.length][0], r[(i + 1) % r.length][1]);
@@ -1195,10 +1211,10 @@
   const MASK_TOOLS = [['smart', 'Smart select', 'S'], ['brush', 'Brush', 'B'], ['box', 'Box', 'R'], ['line', 'Straight lines', 'L']];
   function startMask() {
     const ph = photo();
-    if (!ph || ph.ground || !S.lot || !S.style.showLot || !scene || !scene.lot) { setStatus('Turn on lot lines on a drone photo first.', 'error'); return; }
+    if (!ph || ph.ground || !curLot() || !scene || !scene.lot) { setStatus('Add lot lines to this drone photo first.', 'error'); return; }
     if (mode) endMode();
     mode = 'mask';
-    maskEd = { name: ph.name, canvas: null, ver: 1, savedVer: 1, tool: 'brush', size: 24, show: true, poly: [], preview: null, scene };
+    maskEd = { name: ph.name, canvas: null, ver: 1, savedVer: 1, tool: 'brush', size: 24, show: true, poly: [], preview: null, scene, kind: 'on' };
     maskSync();
     renderMaskBar();
     renderInspector();
@@ -1211,6 +1227,7 @@
     const src = ph.lotMask && DT.mask.fromData(ph.lotMask, () => { if (maskEd) { maskSync(); redraw(); } });
     if (src) c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
     maskEd.canvas = c;
+    maskEd.tint = DT.mask.tint2(c); // updated stroke by stroke from here on
     maskEd.k = c.width / ph.W;
     maskEd.ver++; maskEd.savedVer = maskEd.ver;
     maskEd.preview = null;
@@ -1218,9 +1235,14 @@
   function renderMaskBar() {
     const h = $('#modeHint');
     h.hidden = false;
-    const tip = { smart: 'Hover over the house, a tree or a pool, then click to add it.', brush: 'Paint over what the lines should pass behind.', box: 'Drag a box.', line: 'Click corners; double-click or Enter to close the shape.' }[maskEd.tool];
+    const tip = { smart: 'Hover over the house, a tree or a pool, then click to add it.', brush: 'Paint over what the lines should pass behind.', box: 'Drag a box.', line: 'Click corners; double-click or Enter to close the shape.' }[maskEd.tool]
+      + ' <b>Red</b> = on the property (stays in color), <b>blue</b> = off the property (goes gray with a color callout).';
     h.innerHTML = `<div class="mask-bar">
       <div class="seg">${MASK_TOOLS.map(([id, label, key]) => `<button data-mtool="${id}" class="${maskEd.tool === id ? 'active' : ''}" title="${label} (${key})">${label}</button>`).join('')}</div>
+      <div class="seg kind" title="X switches">
+        <button data-mkind="on" class="${maskEd.kind === 'on' ? 'active' : ''}" title="Stays in color with a color callout (X)">On the property</button>
+        <button data-mkind="off" class="${maskEd.kind === 'off' ? 'active off' : ''}" title="Goes gray with a color callout (X)">Off the property</button>
+      </div>
       ${maskEd.tool === 'brush' ? `<label class="mask-size">Size <input type="range" id="maskSize" min="4" max="160" value="${maskEd.size}"></label>` : ''}
       <label class="check mask-show"><input type="checkbox" id="maskShow" ${maskEd.show ? 'checked' : ''}> Show mask</label>
       <button class="btn small primary" id="maskDone">Done</button>
@@ -1231,6 +1253,8 @@
     if (!maskEd) return;
     const t = e.target.closest('[data-mtool]');
     if (t) { setMaskTool(t.dataset.mtool); return; }
+    const kd = e.target.closest('[data-mkind]');
+    if (kd) { maskEd.kind = kd.dataset.mkind; renderMaskBar(); redraw(); return; }
     if (e.target.closest('#maskDone')) endMode();
   });
   $('#modeHint').addEventListener('input', (e) => {
@@ -1256,14 +1280,38 @@
   }
   const maskOp = (e) => e.altKey ? 'remove' : 'add';
   const capture = (e) => { try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not a real pointer */ } };
+  // Paint on the mask (white = on the property, blue = off) and on its
+  // see-through preview in the matching color.
   function paint(op, fn) {
-    const x = maskEd.canvas.getContext('2d');
-    x.save();
-    x.globalCompositeOperation = op === 'remove' ? 'destination-out' : 'source-over';
-    x.fillStyle = x.strokeStyle = '#fff';
-    x.scale(maskEd.k, maskEd.k);
-    fn(x);
-    x.restore();
+    const off = maskEd.kind === 'off';
+    for (const [cv, color] of [[maskEd.canvas, off ? DT.mask.OFF : DT.mask.ON], [maskEd.tint, DT.mask.TINT[off ? 'off' : 'on']]]) {
+      const x = cv.getContext('2d');
+      x.save();
+      if (op === 'remove') x.globalCompositeOperation = 'destination-out';
+      else {
+        // Replace whatever was there (so on ↔ off can be repainted).
+        const tmp = document.createElement('canvas');
+        tmp.width = cv.width; tmp.height = cv.height;
+        const t = tmp.getContext('2d');
+        t.fillStyle = t.strokeStyle = '#000';
+        t.scale(maskEd.k, maskEd.k);
+        fn(t, true);
+        x.globalCompositeOperation = 'destination-out';
+        x.drawImage(tmp, 0, 0);
+        x.globalCompositeOperation = 'source-over';
+        t.setTransform(1, 0, 0, 1, 0, 0);
+        t.globalCompositeOperation = 'source-in';
+        t.fillStyle = color;
+        t.fillRect(0, 0, tmp.width, tmp.height);
+        x.drawImage(tmp, 0, 0);
+        x.restore();
+        continue;
+      }
+      x.fillStyle = x.strokeStyle = '#fff';
+      x.scale(maskEd.k, maskEd.k);
+      fn(x);
+      x.restore();
+    }
     maskEd.ver++;
   }
   function maskSave() {
@@ -1653,6 +1701,7 @@
     place: () => sel && sel.kind === 'place' ? S.places[sel.id] : null,
     cat: () => sel && sel.kind === 'cat' ? catById(sel.id) : null,
     adj: () => photo() && photo().adj,
+    lot: () => curLot(),
   };
   function getPath(path) {
     const [root, key] = path.split('.');
@@ -1779,27 +1828,39 @@
   }
 
   function lotPanel() {
-    const L = S.lot;
+    const L = curLot();
     const ac = L && (L.edited ? lotAcres() : L.acres ?? lotAcres());
-    return `<h3 class="sec">Lot lines</h3>
-      ${L ? `<p class="hint">From: <b>${esc(L.source)}</b>${L.edited && L.source !== 'drawn by hand' ? ' (adjusted by you)' : ''}${ac ? ` · about ${ac.toFixed(2)} acres` : ''}</p>` : '<p class="hint">No lot lines yet for this job.</p>'}
-      ${ui.check('Show lot lines', 'style.showLot')}
+    const ph = photo();
+    const others = S.photos.map((x, i) => ({ x, i })).filter(o => o.i !== cur && o.x.lot && !o.x.ground);
+    if (ph && ph.ground) return `<h3 class="sec">Lot lines</h3><p class="hint">Lot lines need a drone photo. Pick a drone photo in the strip below.</p>`;
+    const sc = scene && scene.pop;
+    return `<h3 class="sec">Lot lines on this photo</h3>
+      ${L ? `<p class="hint">From: <b>${esc(L.source)}</b>${L.edited && L.source !== 'drawn by hand' ? ' (adjusted by you)' : ''}${ac ? ` · about ${ac.toFixed(2)} acres` : ''}</p>` : '<p class="hint">No lot lines on this photo. Each photo gets its own, so adding them here won’t change your other photos.</p>'}
+      ${L ? ui.check('Show the lines', 'lot.lines') + ui.check('Color callout: lot in color, surroundings gray', 'lot.pop') : ''}
+      ${L && L.pop ? `<div class="sub-fields">
+        ${ui.range('How gray', 'style.popGray', 0.2, 1, 0.05, { fallback: 1, fmt: (x) => Math.round(x * 100) + '%' })}
+        ${ui.range('Darken surroundings', 'style.popDark', 0, 0.5, 0.02, { fallback: 0, fmt: (x) => Math.round(x * 100) + '%' })}
+        ${ui.check('Keep the sky in color', 'style.popSky')}
+        ${S.style.popSky !== false ? (sc && sc.sky ? ui.range('Move the sky line', 'lot.sky', -0.15, 0.15, 0.002, { fallback: 0, fmt: (x) => (x > 0 ? 'down ' : x < 0 ? 'up ' : '') + Math.abs(Math.round(x * 1000) / 10) + '%' }) : '<p class="hint">No sky in this shot.</p>') : ''}
+        <p class="hint">To keep the house or trees that stick out past the lot in color, mark them below as <b>on the property</b>. Mark a neighbor’s tree as <b>off the property</b> to turn it gray.</p>
+      </div>` : ''}
       <div class="btn-col">
         <button class="btn block" data-act="lot-find">${L ? 'Look up the lot lines again' : 'Find lot lines automatically'}</button>
         <button class="btn block" data-act="lot-find-pin" ${photo() && photo().house ? '' : 'disabled'} title="Uses the spot where you dragged the house pin on this photo">Find the lot under the house pin</button>
         <button class="btn block" data-act="lot-draw">Draw lot lines by hand</button>
-        ${L ? '<button class="btn block danger" data-act="lot-delete">Remove lot lines</button>' : ''}
+        ${others.length ? `<p class="hint">Or copy the outline from another photo (it won’t stay linked):</p>${others.slice(0, 6).map(o => `<button class="btn block subtle" data-act="lot-copy" data-from="${o.i}">Copy from ${esc(o.x.name)}</button>`).join('')}` : ''}
+        ${L ? '<button class="btn block danger" data-act="lot-delete">Remove lot lines from this photo</button>' : ''}
       </div>
       ${L && sel && sel.vertex != null && L.ring[sel.vertex] ? `<div class="btn-col"><p class="hint"><b>Corner selected.</b></p><button class="btn block" data-act="lot-del-corner">Delete this corner</button></div>` : ''}
       ${L && sel && sel.edge != null && L.ring[sel.edge] ? `<div class="btn-col"><p class="hint"><b>Side selected.</b></p><button class="btn block" data-act="lot-toggle-side">${L.ring[sel.edge][2] ? 'Bring this side back' : 'Delete this side'}</button></div>` : ''}
       ${L && L.ring.some(c => c[2]) ? '<button class="btn block" data-act="lot-all-sides">Bring back all deleted sides</button>' : ''}
-      ${L ? `<h3 class="sec">Pass behind the house &amp; trees</h3>
-        <p class="hint">Mark what the lot lines should go <i>behind</i> on this photo (house, trees, pool…). Callouts always stay in front.${photo() && photo().lotMask ? ' <b>This photo has a mask.</b>' : ''}</p>
+      ${L ? `<h3 class="sec">Mask: house &amp; trees</h3>
+        <p class="hint">Mark what the lot lines should go <i>behind</i> on this photo (house, trees, pool…)${L.pop ? ', and what should stay in color or go gray' : ''}. Callouts always stay in front.${photo() && photo().lotMask ? ' <b>This photo has a mask.</b>' : ''}</p>
         <div class="btn-col">
-          <button class="btn block" data-act="mask-edit" ${photo() && !photo().ground && S.style.showLot ? '' : 'disabled'}>${photo() && photo().lotMask ? 'Edit the mask on this photo' : 'Mask this photo…'}</button>
+          <button class="btn block" data-act="mask-edit" ${photo() && !photo().ground && (L.lines !== false || L.pop) ? '' : 'disabled'}>${photo() && photo().lotMask ? 'Edit the mask on this photo' : 'Mask this photo…'}</button>
           ${photo() && photo().lotMask ? '<button class="btn block subtle" data-act="mask-clear">Clear the mask on this photo</button>' : ''}
         </div>` : ''}
-      <ul class="tips"><li>Drag a <b>corner</b> to move it (on any photo; all photos update).</li><li>Drag a small <b>middle handle</b> to add a corner.</li><li>Click a <b>corner</b> or a <b>side</b>, then press <b>Delete</b> to remove it. Deleted sides show as a faint dashed line while editing; click one and press Delete again to bring it back.</li><li><b>Scroll out</b> past the edge of the photo to reach corners that are out of frame.</li></ul>
+      <ul class="tips"><li>Drag a <b>corner</b> to move it (this photo only).</li><li>Drag a small <b>middle handle</b> to add a corner.</li><li>Click a <b>corner</b> or a <b>side</b>, then press <b>Delete</b> to remove it. Deleted sides show as a faint dashed line while editing; click one and press Delete again to bring it back.</li><li><b>Scroll out</b> past the edge of the photo to reach corners that are out of frame.</li></ul>
       <p class="hint">Automatic lookup uses county appraisal district maps (${esc(PL.LOT_COVERAGE)}). If it picks the wrong lot, drag the house pin onto the house and use “Find the lot under the house pin”, or draw by hand.</p>
       <h3 class="sec">Look</h3>
       ${ui.color('Line color', 'style.lotColor', '#ffffff')}
@@ -1807,7 +1868,7 @@
       ${ui.select('Line style', 'style.lotDash', [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']])}
       ${ui.range('Fill', 'style.lotFill', 0, 0.6, 0.02, { fallback: 0, fmt: (x) => Math.round(x * 100) + '%' })}
       <h3 class="sec">Disclaimer</h3>
-      ${ui.check('Add a disclaimer when lot lines are shown', 'style.lotNote')}
+      ${ui.check('Add a disclaimer when lot lines or a color callout are shown', 'style.lotNote')}
       ${S.style.lotNote !== false ? ui.text('Text', 'style.lotNoteText', LOT_NOTE_TEXT) : ''}
       <p class="hint">Uses the same corner and text size as the school disclaimer (Style tab).</p>`;
   }
@@ -1840,8 +1901,7 @@
       ${ui.color('Pin color', 'style.pinColor', '#e11d48')}
       ${ui.range('Pin size', 'style.pinSize', 20, 160, 1)}
       <h3 class="sec">Lot lines</h3>
-      ${ui.check('Show lot lines', 'style.showLot')}
-      <button class="btn block" data-act="lot-edit">${S.lot ? 'Edit lot lines…' : 'Set up lot lines…'}</button>
+      <button class="btn block" data-act="lot-edit">${curLot() ? 'Edit lot lines on this photo…' : 'Add lot lines to this photo…'}</button>
       <h3 class="sec">School disclaimer</h3>
       ${ui.check('Add a disclaimer when a school is shown', 'style.schoolNote')}
       ${S.style.schoolNote ? ui.text('Text', 'style.schoolNoteText', SCHOOL_NOTE_TEXT) : ''}
@@ -2034,11 +2094,10 @@
         for (const x of S.photos) if ((x.meta.model || '') === model) x.adj.heading = t.value;
       }
       if (t.dataset.path.startsWith('style.font')) ensureFont().then(redraw);
-      if (t.dataset.path === 'style.showLot' && S.style.showLot && !S.lot && S.house) autoFindLot();
       commit();
       const keepFocus = t.type === 'range';
       redraw(); renderSidebar(); renderFilmstrip();
-      if (!keepFocus || /^(style\.(boxStyle|dotColorMode|borderWidth|schoolNote|showLot|lotNote)|adj\.manual)$/.test(t.dataset.path)) renderInspector();
+      if (!keepFocus || /^(style\.(boxStyle|dotColorMode|borderWidth|schoolNote|showLot|lotNote|popSky)|adj\.manual|lot\.(lines|pop))$/.test(t.dataset.path)) renderInspector();
       maybeFetchDrive();
       return;
     }
@@ -2113,7 +2172,7 @@
       case 'house-reset': ph.house = null; break;
       case 'make-drone': ph.ground = false; ph.adj.manual = true; break;
       case 'make-ground': ph.ground = true; break;
-      case 'lot-edit': select({ kind: 'lot' }); if (!S.lot && S.house) autoFindLot(); return;
+      case 'lot-edit': select({ kind: 'lot' }); if (!curLot() && S.house) autoFindLot(); return;
       case 'lot-find': autoFindLot(); return;
       case 'lot-find-pin': {
         const cam = PJ.buildCamera(ph, S.house);
@@ -2122,12 +2181,17 @@
         return;
       }
       case 'lot-draw': startDrawLot(); return;
-      case 'lot-delete': S.lot = null; sel = null; break;
+      case 'lot-delete': delete ph.lot; delete ph.lotMask; sel = null; break;
+      case 'lot-copy': {
+        const src = S.photos[+t.dataset.from];
+        if (src && src.lot) { ph.lot = clone(src.lot); }
+        break;
+      }
       case 'lot-del-corner': deleteLotCorner(sel.vertex); return;
       case 'lot-toggle-side': toggleLotSide(sel.edge); return;
       case 'mask-edit': startMask(); return;
       case 'mask-clear': delete ph.lotMask; if (mode === 'mask') maskSync(); break;
-      case 'lot-all-sides': for (const c of S.lot.ring) c.length = 2; S.lot.edited = true; break;
+      case 'lot-all-sides': for (const c of curLot().ring) c.length = 2; curLot().edited = true; break;
       case 'align-house': {
         const targets = alignTargets(ph);
         if (!targets.length) return;
@@ -2547,6 +2611,7 @@
       if ((e.key === 'Backspace' || e.key === 'Delete') && maskEd.poly.length) { e.preventDefault(); maskEd.poly.pop(); redraw(); return; }
       const tk = { s: 'smart', b: 'brush', r: 'box', l: 'line' }[e.key.toLowerCase()];
       if (tk && !mod) { setMaskTool(tk); return; }
+      if (e.key.toLowerCase() === 'x' && !mod) { maskEd.kind = maskEd.kind === 'off' ? 'on' : 'off'; renderMaskBar(); redraw(); return; }
       if (e.key === '[' || e.key === ']') { maskEd.size = Math.max(4, Math.min(160, Math.round(maskEd.size * (e.key === ']' ? 1.25 : 0.8)))); renderMaskBar(); redraw(); return; }
       if (e.key === 'Alt' || e.key === 'Shift') { maskEd.alt = e.altKey; if (maskEd.preview) maskEd.preview.op = maskOp(e); redraw(); }
       return;
@@ -2886,7 +2951,7 @@
   });
 
   // For checking things from the browser console.
-  DT.debug = { addressFromName, normAddr, get jobs() { return jobs; }, get S() { return S; }, get ji() { return ji; } };
+  DT.debug = { addressFromName, normAddr, get jobs() { return jobs; }, get S() { return S; }, get ji() { return ji; }, get scene() { return scene; }, buildScene, camFor };
 
   // ---------------- Start ----------------
   (async function init() {
