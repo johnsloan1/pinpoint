@@ -1,0 +1,24 @@
+# Rebuilds the ready-made DFW place data on the 1st of every month and saves
+# it back to the site. Can also be run by hand from the GitHub "Actions" tab.
+name: Refresh DFW place data
+on:
+  schedule:
+    - cron: '0 9 1 * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and build place data
+        run: python3 tools/build_dfw_data.py
+      - name: Save changes
+        run: |
+          git config user.name "pinpoint-bot"
+          git config user.email "pinpoint-bot@users.noreply.github.com"
+          git add data/dfw
+          git diff --cached --quiet || git commit -m "Monthly DFW place data refresh"
+          git push

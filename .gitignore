@@ -1,0 +1,6 @@
+# Download cache for the map-data builder (large; rebuilt as needed)
+tools/.cache/
+tools/build.log
+# Test photos of real properties stay on this Mac
+test/
+.DS_Store

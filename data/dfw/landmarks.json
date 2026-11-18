@@ -1,0 +1,131 @@
+{
+ "built": "2026-11-18",
+ "landmarks": [
+  {
+   "cat": "skyline",
+   "name": "Downtown Dallas",
+   "lat": 32.78001,
+   "lon": -96.8039
+  },
+  {
+   "cat": "skyline",
+   "name": "Downtown Fort Worth",
+   "lat": 32.75046,
+   "lon": -97.33454
+  },
+  {
+   "cat": "skyline",
+   "name": "Reunion Tower",
+   "lat": 32.77535,
+   "lon": -96.80894
+  },
+  {
+   "cat": "airport",
+   "name": "DFW Airport",
+   "lat": 32.8962,
+   "lon": -97.04585
+  },
+  {
+   "cat": "airport",
+   "name": "Dallas Love Field",
+   "lat": 32.84524,
+   "lon": -96.84732
+  },
+  {
+   "cat": "airport",
+   "name": "Alliance Airport",
+   "lat": 32.993,
+   "lon": -97.31837
+  },
+  {
+   "cat": "airport",
+   "name": "Addison Airport",
+   "lat": 32.96881,
+   "lon": -96.83603
+  },
+  {
+   "cat": "airport",
+   "name": "Meacham Airport",
+   "lat": 32.81969,
+   "lon": -97.35969
+  },
+  {
+   "cat": "airport",
+   "name": "McKinney National Airport",
+   "lat": 33.17614,
+   "lon": -96.59039
+  },
+  {
+   "cat": "airport",
+   "name": "Denton Enterprise Airport",
+   "lat": 33.20495,
+   "lon": -97.19925
+  },
+  {
+   "cat": "airport",
+   "name": "Dallas Executive Airport",
+   "lat": 32.67966,
+   "lon": -96.86888
+  },
+  {
+   "cat": "airport",
+   "name": "Arlington Municipal Airport",
+   "lat": 32.66541,
+   "lon": -97.09437
+  },
+  {
+   "cat": "business",
+   "name": "Legacy West",
+   "lat": 33.08108,
+   "lon": -96.82618
+  },
+  {
+   "cat": "business",
+   "name": "Granite Park",
+   "lat": 33.09071,
+   "lon": -96.8193
+  },
+  {
+   "cat": "business",
+   "name": "The Star in Frisco",
+   "lat": 33.1097,
+   "lon": -96.8287
+  },
+  {
+   "cat": "business",
+   "name": "Las Colinas",
+   "lat": 32.86822,
+   "lon": -96.93325
+  },
+  {
+   "cat": "business",
+   "name": "CityLine",
+   "lat": 32.99883,
+   "lon": -96.69872
+  },
+  {
+   "cat": "business",
+   "name": "AllianceTexas",
+   "lat": 32.90885,
+   "lon": -97.31399
+  },
+  {
+   "cat": "business",
+   "name": "Uptown Dallas",
+   "lat": 32.80071,
+   "lon": -96.79986
+  },
+  {
+   "cat": "business",
+   "name": "Dallas Galleria",
+   "lat": 32.93029,
+   "lon": -96.81959
+  },
+  {
+   "cat": "attraction",
+   "name": "Dickies Arena",
+   "lat": 32.74107,
+   "lon": -97.36848
+  }
+ ]
+}

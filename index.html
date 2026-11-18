@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pinpoint</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="assets/pinpoint-icon-512.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <meta name="theme-color" content="#15233b">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Lato:wght@400;700&family=Montserrat:wght@500;600;700&family=Oswald:wght@500;600&family=Playfair+Display:wght@500;700&family=Poppins:wght@500;600;700&family=Roboto+Condensed:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="assets/pinpoint-header.png?v=2" alt="Pinpoint by John Sloan" class="brand-logo" width="102" height="32">
+    </div>
+    <div class="actions">
+      <label class="btn primary" title="Add photos. They're sorted into properties automatically (by folder, file name and GPS).">Add photos<input type="file" id="fileInput" accept="image/jpeg,.jpg,.jpeg" multiple hidden></label>
+      <label class="btn" title="Add a folder of photos. Each subfolder (named by address) becomes its own property.">Add folder<input type="file" id="folderInput" webkitdirectory multiple hidden></label>
+      <span class="sep"></span>
+      <button class="btn icon" id="btnUndo" title="Undo (⌘Z)" disabled>↶</button>
+      <button class="btn icon" id="btnRedo" title="Redo (⇧⌘Z)" disabled>↷</button>
+      <span class="sep"></span>
+      <button class="btn" id="btnNew" title="Start another property (type its address by hand)">New property</button>
+      <label class="btn" title="Open a saved project file">Open<input type="file" id="projectInput" accept=".json,application/json" hidden></label>
+      <button class="btn" id="btnSave" title="Save this job so you can reopen it later">Save</button>
+      <span class="sep"></span>
+      <button class="btn" id="btnExport">Export this photo</button>
+      <button class="btn primary" id="btnExportAll">Export all</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <label class="lbl" for="address">Property address</label>
+        <input id="address" type="text" placeholder="123 Main St, Flower Mound, TX 75028" autocomplete="off">
+        <button class="btn primary block" id="btnFind">Find places</button>
+        <div id="status" class="status" role="status"></div>
+      </section>
+      <section class="panel">
+        <div class="row between"><label class="lbl" for="master">Show places within</label><output id="masterOut"></output></div>
+        <input id="master" type="range" min="0.25" max="15" step="0.25">
+        <div class="row between drive-row">
+          <label class="check"><input type="checkbox" id="showDrive"> Drive info on callouts</label>
+          <select id="driveMode">
+            <option value="both">Time + miles</option>
+            <option value="time">Time only</option>
+            <option value="distance">Miles only</option>
+          </select>
+        </div>
+      </section>
+      <div class="types-row"><span class="lbl">Places to tag</span><button class="btn small" id="btnTypes" title="Pick which kinds of places this app looks for">⚙ Choose types</button></div>
+      <div class="view-row">
+        <div class="seg" id="viewToggle" role="group" aria-label="Sidebar view">
+          <button data-view="job" title="Every place you can tag in any photo">Whole job</button>
+          <button data-view="photo" title="Fine-tune the photo on screen">This photo</button>
+        </div>
+        <p class="hint" id="viewHint"></p>
+      </div>
+      <div id="catList" class="cat-list"></div>
+      <section class="panel buttons">
+        <button class="btn block" id="btnAddCustom">+ Add a callout by clicking the photo</button>
+        <button class="btn block subtle" id="btnAddCat">+ New category</button>
+      </section>
+      <footer class="credits">Place data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · Drive times by <a href="https://project-osrm.org" target="_blank" rel="noopener">OSRM</a></footer>
+    </aside>
+
+    <section class="stage">
+      <div id="jobBar" class="jobbar" hidden></div>
+      <div id="banner" class="banner" hidden></div>
+      <div id="canvasWrap" class="canvas-wrap">
+        <canvas id="view"></canvas>
+        <button id="zoomFit" class="zoom-badge" hidden title="Show the whole photo (or double-click an empty spot)">100% · Fit</button>
+        <div id="empty" class="empty">
+          <div class="empty-card">
+            <img src="assets/pinpoint-logo-800.png" alt="Pinpoint by John Sloan" class="empty-logo" width="240" height="121">
+            <h2>Drop edited DJI photos here</h2>
+            <p>Photos or whole folders, from one property or several. They're sorted into properties by folder name, file name (like “123 Main St 03.jpg”) and GPS, and the address is found for you.</p>
+            <p>Export from Lightroom with <b>Metadata: All Metadata</b> so the camera direction is kept.</p>
+          </div>
+        </div>
+        <div id="modeHint" class="mode-hint" hidden></div>
+      </div>
+      <div id="filmstrip" class="filmstrip"></div>
+    </section>
+
+    <aside class="inspector">
+      <nav class="tabs" id="tabs">
+        <button data-tab="item" class="active">Edit</button>
+        <button data-tab="style">Style</button>
+        <button data-tab="camera">Camera</button>
+        <button data-tab="presets">Presets &amp; logos</button>
+      </nav>
+      <div id="inspector" class="inspector-body"></div>
+    </aside>
+  </main>
+
+  <dialog id="iconDlg" class="dlg">
+    <form method="dialog" class="dlg-inner">
+      <div class="row between"><h3>Choose an icon</h3><button class="btn icon" value="cancel" aria-label="Close">✕</button></div>
+      <div class="lbl">Built-in</div>
+      <div id="iconGrid" class="icon-grid"></div>
+      <div class="lbl">Your logo library</div>
+      <input type="search" id="logoFilter" placeholder="Search logos…" hidden>
+      <div id="logoGrid" class="icon-grid logo-grid"></div>
+      <label class="btn block">Upload a logo or image…<input type="file" id="logoInput" accept="image/*" hidden></label>
+      <p class="hint">Any image works: school logos, highway shields, brand marks. It’s saved to your logo library, and this place will use it automatically on future jobs.</p>
+    </form>
+  </dialog>
+
+  <dialog id="typesDlg" class="dlg">
+    <form method="dialog" class="dlg-inner">
+      <div class="row between"><h3>Place types</h3><button class="btn icon" value="close" aria-label="Close">✕</button></div>
+      <p class="hint">Only the types you tick here are searched and shown in the sidebar. Turn one on any time you need it. This setting is remembered for every job.</p>
+      <div id="typesBody" class="types-body"></div>
+      <div class="row end"><button class="btn primary" value="close">Done</button></div>
+    </form>
+  </dialog>
+
+  <div id="busy" class="busy" hidden><div class="busy-card"><div class="spinner"></div><div id="busyText">Working…</div></div></div>
+
+  <script src="js/icons.js"></script>
+  <script src="js/metadata.js"></script>
+  <script src="js/projection.js"></script>
+  <script src="js/places.js"></script>
+  <script src="js/services.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/layout.js"></script>
+  <script src="js/logos.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
