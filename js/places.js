@@ -118,8 +118,8 @@
     // (size checked later). A single school's own field doesn't count.
     if (isVenue(t)) {
       if (SCHOOL_VENUE_RE.test(name + ' ' + (t.operator || ''))) return t.leisure === 'sports_centre' ? null : 'skip';
+      if (t.leisure === 'sports_centre' && AMENITY_RE.test(name)) return null; // rec/aquatic center → neighborhood amenity
       if (t.wikidata) return 'attraction';
-      if (t.leisure === 'sports_centre' && AMENITY_RE.test(name)) return null; // rec center → neighborhood amenity
       if (t.leisure === 'stadium' || t.building === 'stadium' || VENUE_RE.test(name)) return 'attraction';
       return null;
     }
