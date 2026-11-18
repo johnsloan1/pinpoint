@@ -27,6 +27,11 @@ hosted version behaves.)
    - **Eye-level photos** (no drone camera data or no GPS) are marked EYE
      and left alone: tick places in *This photo* view and drag them into
      position. The ✕ on a thumbnail removes a photo (⌘Z undoes).
+   - **Dropbox:** click **Dropbox**, connect once (Dropbox's own sign-in
+     page), pick your main shoots folder, tick address folders and click
+     **Open**. Export then saves into a `callouts` folder inside each
+     address folder instead of downloading. Folders already done show
+     "✓ callouts".
 2. If the address wasn't found, type it and click **Find places**. Use
    **⚙ Choose types** to pick which kinds of places you use at all (for
    example, skip daycares or ponds, or leave out Farm-to-Market roads).

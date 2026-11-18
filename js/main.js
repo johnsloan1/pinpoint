@@ -2,6 +2,7 @@
 // mouse dragging, saving and exporting.
 (function (DT) {
   'use strict';
+  if (DT.dropboxPopup) return; // this window is only the Dropbox sign-in pop-up
   const $ = (s, r = document) => r.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const MI = 1609.344, FT = 0.3048;
@@ -341,9 +342,11 @@
   function matchJob(g, used) {
     if (g.here) return ji;
     // Same address/folder as a property already open, or taken at the same place.
+    const gd = (g.items.find(it => it.dbx) || {}).dbx;
     for (let i = 0; i < jobs.length; i++) {
       const st = i === ji ? S : jobs[i].S;
-      if (g.key && st.jobKey === g.key) return i;
+      if (gd && st.dropbox === gd) return i;
+      if (g.key && st.jobKey === g.key && (!gd || !st.dropbox)) return i;
     }
     const gc = centerOf(g.items.map(it => photoSpot(it.meta)).filter(Boolean));
     if (gc) {
@@ -373,7 +376,7 @@
         const meta = await DT.metadata.readMeta(f);
         const { W, H, bitmap } = await makeDisplayBitmap(f);
         const fo = folders.get(f);
-        items.push({ file: f, meta, W, H, bitmap, folder: fo ? fo.name : null, folderSub: !!(fo && fo.sub) });
+        items.push({ file: f, meta, W, H, bitmap, folder: fo ? fo.name : null, folderSub: !!(fo && fo.sub), dbx: fo && fo.dbx });
       }
       stashJob();
       const groups = sortIntoGroups(items);
@@ -386,6 +389,8 @@
         const j = jobs[i];
         const st = j.S;
         if (g.key && !st.jobKey) st.jobKey = g.key;
+        const dbx = (g.items.find(it => it.dbx) || {}).dbx;
+        if (dbx && !st.dropbox) st.dropbox = dbx; // export goes back to this Dropbox folder
         if (g.hint && !st.addrHint) st.addrHint = g.hint;
         for (const it of g.items) {
           const f = it.file;
@@ -2643,8 +2648,23 @@
     c.width = c.height = 0;
     return blob;
   }
+  // Properties opened from Dropbox save their finished photos back into a
+  // "callouts" folder inside the address folder.
+  const toDropbox = () => !!(S.dropbox && DT.dropbox.connected);
+  async function saveToDropbox(list) {
+    const folder = S.dropbox + '/callouts';
+    for (const [k, i] of list.entries()) {
+      busy(list.length > 1 ? `Saving to Dropbox… ${k + 1} of ${list.length}` : 'Saving to Dropbox…');
+      await DT.dropbox.upload(folder + '/' + exportName(i), await renderExport(i));
+    }
+    setStatus(`Saved ${list.length} photo${list.length > 1 ? 's' : ''} to Dropbox: ${folder.split('/').slice(-2).join('/')}`, 'ok');
+  }
   $('#btnExport').addEventListener('click', async () => {
     if (!photo()) return;
+    if (toDropbox()) {
+      try { await saveToDropbox([cur]); } catch (e) { setStatus('Saving to Dropbox failed: ' + e.message, 'error'); } finally { busy(null); }
+      return;
+    }
     busy('Creating full-resolution JPG…');
     try { download(await renderExport(cur), exportName(cur)); setStatus('Exported ' + exportName(cur), 'ok'); }
     catch (e) { setStatus('Export failed: ' + e.message, 'error'); }
@@ -2653,6 +2673,10 @@
   $('#btnExportAll').addEventListener('click', async () => {
     const ready = S.photos.map((p, i) => i).filter(i => assets.has(S.photos[i].name));
     if (!ready.length) return;
+    if (toDropbox()) {
+      try { await saveToDropbox(ready); } catch (e) { setStatus('Saving to Dropbox failed: ' + e.message, 'error'); } finally { busy(null); }
+      return;
+    }
     try {
       if (ready.length === 1) { busy('Creating full-resolution JPG…'); download(await renderExport(ready[0]), exportName(ready[0])); }
       else {
@@ -2716,6 +2740,147 @@
     e.target.value = '';
   });
   new ResizeObserver(() => redraw()).observe($('#canvasWrap'));
+
+  // ---------------- Dropbox ----------------
+  // Your main shoots folder holds one folder per address. Each becomes a
+  // property; exports go to a "callouts" folder inside it.
+  const DB = DT.dropbox;
+  const dbx = { browse: null, folders: null, info: {}, picked: new Set(), err: null, busy: false };
+  const isJpg = (n) => /\.jpe?g$/i.test(n);
+  function openDropbox() { dbx.err = null; renderDropbox(); $('#dbxDlg').showModal(); if (DB.connected && DB.root && !dbx.folders) loadFolders(); }
+  $('#btnDropbox').addEventListener('click', openDropbox);
+  const fmtDay = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(iso).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }) : '';
+  function renderDropbox() {
+    const el = $('#dbxBody');
+    const err = dbx.err ? `<p class="status error">${esc(dbx.err)}</p>` : '';
+    if (!DB.connected) {
+      el.innerHTML = `<p class="hint">Open shoots straight from Dropbox: each address folder in your main shoots folder becomes a property, and finished photos are saved back into a <b>callouts</b> folder inside it.</p>
+        <p class="hint">You sign in on Dropbox’s own page; Pinpoint never sees your password. The connection is remembered in this browser.</p>
+        ${err}<button class="btn primary block" type="button" data-dbx="connect">Connect Dropbox</button>`;
+      return;
+    }
+    const who = `<div class="row between dbx-who"><span>Connected${DB.name ? ' as <b>' + esc(DB.name) + '</b>' : ''}</span><button class="btn small subtle" type="button" data-dbx="disconnect">Disconnect</button></div>`;
+    if (!DB.root || dbx.browse != null) {
+      const path = dbx.browse || '';
+      const crumbs = path.split('/').filter(Boolean);
+      const items = dbx.browseList;
+      el.innerHTML = `${who}<p class="hint"><b>Choose your main shoots folder</b>: the one that holds a folder for each address.</p>
+        <div class="dbx-crumbs"><a href="#" data-dbx-go="">Dropbox</a>${crumbs.map((c, i) => ` / <a href="#" data-dbx-go="${esc('/' + crumbs.slice(0, i + 1).join('/'))}">${esc(c)}</a>`).join('')}</div>
+        ${err}
+        <div class="dbx-list">${items == null ? '<p class="hint">Loading…</p>' : items.length ? items.map(f => `<button type="button" class="dbx-row" data-dbx-go="${esc(f.path_display)}">📁 ${esc(f.name)}</button>`).join('') : '<p class="hint">No folders here.</p>'}</div>
+        <div class="row between">${DB.root ? '<button class="btn" type="button" data-dbx="cancel-browse">Cancel</button>' : '<span></span>'}
+          <button class="btn primary" type="button" data-dbx="use-folder" ${path ? '' : 'disabled'}>Use “${esc(crumbs[crumbs.length - 1] || 'Dropbox')}”</button></div>`;
+      if (items == null && !dbx.busy) browseTo(path);
+      return;
+    }
+    const open = new Set(jobs.map((j, i) => (i === ji ? S : j.S).dropbox).filter(Boolean));
+    const rows = (dbx.folders || []).slice().sort((a, b) => {
+      const ia = dbx.info[a.path_lower], ib = dbx.info[b.path_lower];
+      return ((ib && ib.newest) || '').localeCompare((ia && ia.newest) || '') || a.name.localeCompare(b.name);
+    });
+    el.innerHTML = `${who}
+      <div class="row between"><span class="hint">Main folder: <b>${esc(DB.root)}</b></span><button class="btn small" type="button" data-dbx="change-root">Change</button></div>
+      ${err}
+      <div class="dbx-list">${dbx.folders == null ? '<p class="hint">Loading your shoots…</p>' : !rows.length ? '<p class="hint">No address folders in this folder yet.</p>' : rows.map(f => {
+        const inf = dbx.info[f.path_lower];
+        const isOpen = open.has(f.path_display);
+        const meta = !inf ? '…' : `${inf.jpgs} photo${inf.jpgs === 1 ? '' : 's'}${inf.newest ? ' · ' + fmtDay(inf.newest) : ''}${inf.done ? ' · <span class="dbx-done">✓ callouts</span>' : ''}`;
+        return `<label class="dbx-row ${isOpen ? 'open' : ''}"><input type="checkbox" data-dbx-pick="${esc(f.path_display)}" ${dbx.picked.has(f.path_display) ? 'checked' : ''} ${isOpen || (inf && !inf.jpgs) ? 'disabled' : ''}>
+          <span class="dbx-name">${esc(f.name)}</span><span class="dbx-meta">${isOpen ? 'open' : meta}</span></label>`;
+      }).join('')}</div>
+      <div class="row between"><button class="btn small subtle" type="button" data-dbx="refresh">Refresh</button>
+        <button class="btn primary" type="button" data-dbx="open" ${dbx.picked.size ? '' : 'disabled'}>Open ${dbx.picked.size || ''} ${dbx.picked.size === 1 ? 'property' : 'properties'}</button></div>`;
+  }
+  async function browseTo(path) {
+    dbx.browse = path; dbx.browseList = null; dbx.busy = true; renderDropbox();
+    try { dbx.browseList = (await DB.list(path)).filter(e => e['.tag'] === 'folder').sort((a, b) => a.name.localeCompare(b.name)); dbx.err = null; }
+    catch (e) { dbx.err = e.message; dbx.browseList = []; }
+    finally { dbx.busy = false; renderDropbox(); }
+  }
+  async function loadFolders() {
+    dbx.folders = null; dbx.info = {}; renderDropbox();
+    try {
+      const all = await DB.list(DB.root);
+      dbx.folders = all.filter(e => e['.tag'] === 'folder' && !/^callouts$/i.test(e.name));
+      dbx.err = null;
+      renderDropbox();
+      // Photo count, newest photo and "already has callouts", a few at a time.
+      const q = dbx.folders.slice();
+      const worker = async () => {
+        while (q.length) {
+          const f = q.shift();
+          try {
+            const ents = await DB.list(f.path_lower);
+            const jpg = ents.filter(e => e['.tag'] === 'file' && isJpg(e.name));
+            dbx.info[f.path_lower] = { files: jpg, jpgs: jpg.length, done: ents.some(e => e['.tag'] === 'folder' && /^callouts$/i.test(e.name)),
+              newest: jpg.map(e => e.client_modified || e.server_modified).sort().pop() || null };
+          } catch (e) { dbx.info[f.path_lower] = { files: [], jpgs: 0, err: e.message }; }
+          if ($('#dbxDlg').open) renderDropbox();
+        }
+      };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+    } catch (e) { dbx.err = e.message; dbx.folders = []; renderDropbox(); }
+  }
+  async function openPicked() {
+    const paths = [...dbx.picked];
+    if (!paths.length) return;
+    $('#dbxDlg').close();
+    const files = [], folders = new Map();
+    try {
+      const todo = [];
+      for (const p of paths) {
+        const f = dbx.folders.find(x => x.path_display === p);
+        let inf = dbx.info[f.path_lower];
+        if (!inf || !inf.files) {
+          const ents = await DB.list(f.path_lower);
+          inf = { files: ents.filter(e => e['.tag'] === 'file' && isJpg(e.name)) };
+        }
+        for (const e of inf.files) todo.push({ e, folder: f });
+      }
+      let done = 0;
+      const worker = async () => {
+        while (todo.length) {
+          const { e, folder } = todo.shift();
+          const blob = await DB.download(e.path_lower);
+          const file = new File([blob], e.name, { type: 'image/jpeg', lastModified: Date.parse(e.client_modified || e.server_modified) || Date.now() });
+          files.push(file);
+          folders.set(file, { name: folder.name, sub: true, dbx: folder.path_display });
+          busy(`Downloading from Dropbox… ${++done} of ${done + todo.length}`);
+        }
+      };
+      busy(`Downloading from Dropbox… 0 of ${todo.length}`);
+      await Promise.all([worker(), worker(), worker()]);
+      busy(null);
+      dbx.picked.clear();
+      await addFiles(files, folders);
+    } catch (e) {
+      busy(null);
+      setStatus('Dropbox download failed: ' + e.message, 'error');
+    }
+  }
+  $('#dbxDlg').addEventListener('click', async (e) => {
+    const go = e.target.closest('[data-dbx-go]');
+    if (go) { e.preventDefault(); browseTo(go.dataset.dbxGo); return; }
+    const b = e.target.closest('[data-dbx]');
+    if (!b) return;
+    const act = b.dataset.dbx;
+    if (act === 'connect') {
+      try { dbx.err = null; await DB.connect(); dbx.browse = ''; dbx.browseList = null; }
+      catch (err) { dbx.err = err.message; }
+      renderDropbox();
+    } else if (act === 'disconnect') { DB.disconnect(); dbx.folders = null; dbx.browse = null; renderDropbox(); }
+    else if (act === 'change-root') browseTo(DB.root ? DB.root.split('/').slice(0, -1).join('/') : '');
+    else if (act === 'cancel-browse') { dbx.browse = null; renderDropbox(); }
+    else if (act === 'use-folder') { DB.setRoot(dbx.browse); dbx.browse = null; dbx.picked.clear(); loadFolders(); }
+    else if (act === 'refresh') loadFolders();
+    else if (act === 'open') openPicked();
+  });
+  $('#dbxDlg').addEventListener('change', (e) => {
+    const p = e.target.dataset.dbxPick;
+    if (p == null) return;
+    if (e.target.checked) dbx.picked.add(p); else dbx.picked.delete(p);
+    renderDropbox();
+  });
 
   // For checking things from the browser console.
   DT.debug = { addressFromName, normAddr, get jobs() { return jobs; }, get S() { return S; }, get ji() { return ji; } };
