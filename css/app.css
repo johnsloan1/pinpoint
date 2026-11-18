@@ -275,3 +275,14 @@ body.dropping .canvas-wrap { outline: 3px dashed var(--accent); outline-offset: 
 .job-x.confirm { background: #e5484d; color: #fff; font-weight: 700; top: 50%; transform: translateY(-50%); }
 .job-add { flex: none; border: 1px dashed var(--line); background: transparent; color: var(--muted); border-radius: 8px; padding: 0 14px; cursor: pointer; font-weight: 600; }
 .job-add:hover { color: var(--text); border-color: var(--muted); }
+
+/* ---------- Lot-line mask toolbar ---------- */
+.mask-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-weight: 500; }
+.mask-bar .seg button { padding: 4px 10px; }
+.mask-bar .seg button.active { background: var(--accent-ink, #0b1220); color: var(--accent, #60a5fa); }
+.mask-size { display: flex; align-items: center; gap: 6px; }
+.mask-size input { width: 110px; }
+.mask-show { color: inherit; }
+.mask-tip { flex-basis: 100%; font-size: 12px; opacity: .9; }
+.mask-bar .seg { background: rgba(0,0,0,.18); border-color: transparent; }
+.mask-bar .seg button { color: var(--accent-ink); }

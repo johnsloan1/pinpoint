@@ -186,12 +186,35 @@
     return g;
   }
 
+  // Lot-line mask: the masked parts of the photo go back on top of the lot
+  // lines (callouts stay in front).
+  const maskedCache = new WeakMap();
+  function maskedPhoto(image, mask, ver) {
+    const c = maskedCache.get(image);
+    if (c && c.mask === mask && c.ver === ver) return c.canvas;
+    const cv = (c && c.canvas) || document.createElement('canvas');
+    cv.width = image.width; cv.height = image.height;
+    const x = cv.getContext('2d');
+    x.clearRect(0, 0, cv.width, cv.height);
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(mask, 0, 0, cv.width, cv.height);
+    x.globalCompositeOperation = 'source-in';
+    x.drawImage(image, 0, 0);
+    x.globalCompositeOperation = 'source-over';
+    maskedCache.set(image, { mask, ver, canvas: cv });
+    return cv;
+  }
+
   // Draw everything. scene comes from main.js (positions in photo pixels).
   function drawScene(ctx, scene, image, opts = {}) {
     const { W, H, style, items } = scene;
     const u = unit(W);
     if (image) ctx.drawImage(image, 0, 0, W, H);
     if (scene.lot) drawLot(ctx, scene.lot, style, u);
+    if (scene.lot && image && opts.lotMask) ctx.drawImage(maskedPhoto(image, opts.lotMask, opts.lotMaskVer || 0), 0, 0, W, H);
+    // While editing a mask: show it (and the smart-select guess) tinted.
+    if (opts.maskTint) ctx.drawImage(opts.maskTint, 0, 0, W, H);
+    if (opts.maskPreview) ctx.drawImage(opts.maskPreview, 0, 0, W, H);
     for (const it of items) drawLine(ctx, it, style, u);
     for (const it of items) drawDot(ctx, it, style, u);
     if (scene.house && style.showPin) drawPin(ctx, scene.house.x, scene.house.y, style, u);

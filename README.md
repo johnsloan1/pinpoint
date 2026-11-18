@@ -64,6 +64,12 @@ hosted version behaves.)
      scroll out to place corners past the edge of the photo. Drag corners
      to adjust, drag the small middle dots to add a corner, click a corner
      or side and press Delete to remove it. Adds "*lot lines approximate".
+   - **Lines behind the house/trees:** Lot lines → **Mask this photo…**.
+     Tools: **Smart select** (hover over a roof, tree or pool and click;
+     downloads a 14 MB selection model the first time it's used, runs in
+     the browser), **Brush** (`[` `]` change size), **Box**, **Straight
+     lines** (click corners, Enter closes). **Shift** adds, **Alt**
+     removes, hold **Space** to move around. Callouts always stay in front.
    - **Disclaimers** (Style tab): the lot-lines note and an optional school
      note ("Buyer to verify school assignment") stack in one corner.
 5. **Export this photo** or **Export all** (a .zip for several photos).

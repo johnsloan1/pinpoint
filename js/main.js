@@ -67,6 +67,7 @@
   function redo() { if (hist.i < hist.stack.length - 1) { hist.i++; S = JSON.parse(hist.stack[hist.i]); if (jobs[ji]) jobs[ji].S = S; afterLoad(); } }
   function afterLoad() {
     cur = Math.min(cur, Math.max(0, S.photos.length - 1));
+    if (mode === 'mask') maskSync();
     if (sel && sel.kind === 'place' && !S.places[sel.id]) sel = null;
     syncGlobalControls();
     renderAll();
@@ -788,7 +789,7 @@
   // While drawing or editing lot lines you can zoom out past the photo's
   // edges, so corners can be placed where the lot runs out of frame.
   const MIN_ZOOM_LOT = 0.35;
-  const lotEditing = () => mode === 'drawLot' || (sel && sel.kind === 'lot');
+  const lotEditing = () => mode === 'drawLot' || mode === 'mask' || (sel && sel.kind === 'lot');
   const minZoom = () => lotEditing() ? MIN_ZOOM_LOT : 1;
   function clampView(ph) {
     view.z = Math.max(minZoom(), Math.min(MAX_ZOOM, view.z));
@@ -804,7 +805,8 @@
     $('#empty').hidden = !!ph;
     canvas.hidden = !ph;
     if (!ph) { scene = null; return; }
-    scene = buildScene(cur);
+    // Mask edits don't move anything, so the layout is reused while masking.
+    scene = mode === 'mask' && maskEd && maskEd.scene ? maskEd.scene : buildScene(cur);
     const wrap = $('#canvasWrap');
     const cw = Math.max(1, wrap.clientWidth), ch = Math.max(1, wrap.clientHeight);
     const pad = 24; // breathing room around the photo at "Fit"
@@ -846,7 +848,14 @@
       ctx.fillText('Photo not loaded — add “' + ph.name + '” with Add photos', ph.W * 0.05, ph.H * 0.5);
     }
     const selectedId = sel ? (sel.kind === 'house' ? '__house' : sel.id) : null;
-    RD.drawScene(ctx, scene, a && a.bitmap, { selectedId, logoImages, lotHandles: sel && sel.kind === 'lot', lotSel: sel && sel.kind === 'lot' ? sel : null, handleR: 7 / zoomScale(), drawPts: mode === 'drawLot' ? drawPts : null });
+    const masking = mode === 'mask' && maskEd;
+    const lm = masking ? maskEd.canvas : DT.mask.fromData(ph.lotMask, redraw);
+    RD.drawScene(ctx, scene, a && a.bitmap, { selectedId: masking ? null : selectedId, logoImages,
+      lotHandles: !masking && sel && sel.kind === 'lot', lotSel: sel && sel.kind === 'lot' ? sel : null, handleR: 7 / zoomScale(), drawPts: mode === 'drawLot' ? drawPts : null,
+      lotMask: lm, lotMaskVer: masking ? maskEd.savedVer : 0,
+      maskTint: masking && maskEd.show ? DT.mask.tint(maskEd.canvas, 'rgba(255,70,70,0.42)', maskEd.ver) : null,
+      maskPreview: masking && maskEd.preview ? DT.mask.tint(maskEd.preview.canvas, maskEd.preview.op === 'remove' ? 'rgba(255,200,0,0.45)' : 'rgba(56,189,248,0.5)', maskEd.preview.id) : null });
+    if (masking) drawMaskOverlay();
     ctx.restore();
     if (editingLot) {
       // Mark the photo's edge; anything outside it won't be in the export.
@@ -929,6 +938,10 @@
     const pt = toImage(e);
     if (mode === 'addCustom') { addCustomAt(pt); return; }
     if (mode === 'drawLot') { addLotPoint(pt); return; }
+    if (mode === 'mask') {
+      if (spaceHeld || e.button === 1) { drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: true }; canvas.setPointerCapture(e.pointerId); return; }
+      maskDown(e, pt); return;
+    }
     const hit = hitTest(pt);
     if (hit && (hit.type === 'lotVertex' || hit.type === 'lotMid')) {
       if (hit.type === 'lotMid') {
@@ -960,6 +973,7 @@
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!scene) return;
+    if (mode === 'mask' && !(drag && drag.pan)) { maskMove(e, toImage(e)); return; }
     const pt = toImage(e);
     if (!drag) {
       if (mode === 'addCustom') { canvas.style.cursor = 'crosshair'; return; }
@@ -1001,7 +1015,8 @@
     }
     redraw();
   });
-  const endDrag = () => {
+  const endDrag = (e) => {
+    if (mode === 'mask' && maskEd && maskEd.drag) { maskUp(e); return; }
     if (drag && drag.lot != null) {
       if (drag.moved) { commit(); renderInspector(); }
       else select({ kind: 'lot', vertex: drag.lot }); // a plain click picks the corner
@@ -1048,6 +1063,7 @@
   }, { passive: false });
   canvas.addEventListener('dblclick', (e) => {
     if (mode === 'drawLot') { finishLot(); return; }
+    if (mode === 'mask') { if (maskEd && maskEd.tool === 'line') maskClosePoly(); return; }
     const hit = hitTest(toImage(e));
     if (hit && hit.type === 'lotVertex') {
       if (S.lot.ring.length > 3) { S.lot.ring.splice(hit.i, 1); S.lot.edited = true; commit(); redraw(); renderInspector(); }
@@ -1165,7 +1181,215 @@
     h.innerHTML = 'Click the spot on the photo where the place is. <button class="btn small" id="cancelMode">Cancel</button>';
     $('#cancelMode').onclick = endMode;
   }
-  function endMode() { mode = null; $('#modeHint').hidden = true; canvas.style.cursor = 'default'; }
+  function endMode() { const wasMask = mode === 'mask'; mode = null; maskEd = null; $('#modeHint').hidden = true; canvas.style.cursor = 'default'; if (wasMask) { renderInspector(); redraw(); } }
+
+  // ---- Lot-line mask: what the lot lines pass behind (house, trees…) ----
+  // Only while editing lot lines. Smart select's model is downloaded the
+  // first time you pick that tool, never otherwise.
+  let maskEd = null, spaceHeld = false;
+  const MASK_TOOLS = [['smart', 'Smart select', 'S'], ['brush', 'Brush', 'B'], ['box', 'Box', 'R'], ['line', 'Straight lines', 'L']];
+  function startMask() {
+    const ph = photo();
+    if (!ph || ph.ground || !S.lot || !S.style.showLot || !scene || !scene.lot) { setStatus('Turn on lot lines on a drone photo first.', 'error'); return; }
+    if (mode) endMode();
+    mode = 'mask';
+    maskEd = { name: ph.name, canvas: null, ver: 1, savedVer: 1, tool: 'brush', size: 24, show: true, poly: [], preview: null, scene };
+    maskSync();
+    renderMaskBar();
+    renderInspector();
+    redraw();
+  }
+  function maskSync() {
+    const ph = photo();
+    if (!maskEd || !ph || ph.name !== maskEd.name) { endMode(); return; }
+    const c = DT.mask.blank(ph.W, ph.H);
+    const src = ph.lotMask && DT.mask.fromData(ph.lotMask, () => { if (maskEd) { maskSync(); redraw(); } });
+    if (src) c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+    maskEd.canvas = c;
+    maskEd.k = c.width / ph.W;
+    maskEd.ver++; maskEd.savedVer = maskEd.ver;
+    maskEd.preview = null;
+  }
+  function renderMaskBar() {
+    const h = $('#modeHint');
+    h.hidden = false;
+    const tip = { smart: 'Hover over the house, a tree or a pool, then click to add it.', brush: 'Paint over what the lines should pass behind.', box: 'Drag a box.', line: 'Click corners; double-click or Enter to close the shape.' }[maskEd.tool];
+    h.innerHTML = `<div class="mask-bar">
+      <div class="seg">${MASK_TOOLS.map(([id, label, key]) => `<button data-mtool="${id}" class="${maskEd.tool === id ? 'active' : ''}" title="${label} (${key})">${label}</button>`).join('')}</div>
+      ${maskEd.tool === 'brush' ? `<label class="mask-size">Size <input type="range" id="maskSize" min="4" max="160" value="${maskEd.size}"></label>` : ''}
+      <label class="check mask-show"><input type="checkbox" id="maskShow" ${maskEd.show ? 'checked' : ''}> Show mask</label>
+      <button class="btn small primary" id="maskDone">Done</button>
+      <div class="mask-tip">${tip} <b>Shift</b> adds, <b>Alt</b> removes. Hold <b>Space</b> and drag to move around; scroll to zoom.${maskEd.status ? ' <i>' + esc(maskEd.status) + '</i>' : ''}</div>
+    </div>`;
+  }
+  $('#modeHint').addEventListener('click', (e) => {
+    if (!maskEd) return;
+    const t = e.target.closest('[data-mtool]');
+    if (t) { setMaskTool(t.dataset.mtool); return; }
+    if (e.target.closest('#maskDone')) endMode();
+  });
+  $('#modeHint').addEventListener('input', (e) => {
+    if (!maskEd) return;
+    if (e.target.id === 'maskSize') { maskEd.size = +e.target.value; redraw(); }
+    if (e.target.id === 'maskShow') { maskEd.show = e.target.checked; redraw(); }
+  });
+  function setMaskTool(t) {
+    if (!maskEd) return;
+    maskEd.tool = t; maskEd.poly = []; maskEd.preview = null; maskEd.drag = null;
+    if (t === 'smart') prepareSmart();
+    renderMaskBar(); redraw();
+  }
+  function maskStatus(msg) { if (!maskEd) return; maskEd.status = msg; renderMaskBar(); }
+  const smartKey = () => (S.jobId || 'job') + '|' + maskEd.name;
+  function prepareSmart() {
+    const a = assets.get(maskEd.name);
+    if (!a) return;
+    const me = maskEd;
+    DT.mask.prepare(smartKey(), a.bitmap, (m) => { if (maskEd === me) maskStatus(m); })
+      .then(() => { if (maskEd === me) maskStatus('Smart select ready.'); })
+      .catch((e) => { console.error(e); if (maskEd === me) { maskStatus('Smart select couldn’t load (' + e.message + '). Use the brush, box or line tools.'); } });
+  }
+  const maskOp = (e) => e.altKey ? 'remove' : 'add';
+  const capture = (e) => { try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not a real pointer */ } };
+  function paint(op, fn) {
+    const x = maskEd.canvas.getContext('2d');
+    x.save();
+    x.globalCompositeOperation = op === 'remove' ? 'destination-out' : 'source-over';
+    x.fillStyle = x.strokeStyle = '#fff';
+    x.scale(maskEd.k, maskEd.k);
+    fn(x);
+    x.restore();
+    maskEd.ver++;
+  }
+  function maskSave() {
+    const ph = photo();
+    if (!maskEd || !ph || ph.name !== maskEd.name) return;
+    if (DT.mask.isEmpty(maskEd.canvas)) delete ph.lotMask;
+    else { ph.lotMask = maskEd.canvas.toDataURL('image/png'); DT.mask.remember(ph.lotMask, maskEd.canvas); }
+    maskEd.savedVer = maskEd.ver;
+    commit();
+    renderInspector();
+    redraw();
+  }
+  function maskDown(e, pt) {
+    if (!maskEd) return;
+    const op = maskOp(e);
+    const t = maskEd.tool;
+    if (t === 'brush') {
+      const r = maskEd.size / zoomScale() / 2;
+      paint(op, (x) => { x.beginPath(); x.arc(pt.x, pt.y, r, 0, Math.PI * 2); x.fill(); });
+      maskEd.drag = { tool: 'brush', op, last: pt, r };
+      capture(e);
+    } else if (t === 'box') {
+      maskEd.drag = { tool: 'box', op, a: pt, b: pt };
+      capture(e);
+    } else if (t === 'line') {
+      if (!maskEd.poly.length) maskEd.polyOp = op;
+      const first = maskEd.poly[0];
+      if (first && maskEd.poly.length > 2 && Math.hypot(pt.x - first.x, pt.y - first.y) < 10 / zoomScale()) { maskClosePoly(); return; }
+      maskEd.poly.push(pt);
+    } else if (t === 'smart') {
+      applySmart(pt, op);
+      return;
+    }
+    redraw();
+  }
+  function maskMove(e, pt) {
+    if (!maskEd) return;
+    maskEd.cursor = pt;
+    maskEd.alt = e.altKey;
+    const d = maskEd.drag;
+    if (d && d.tool === 'brush') {
+      paint(d.op, (x) => { x.lineWidth = d.r * 2; x.lineCap = 'round'; x.beginPath(); x.moveTo(d.last.x, d.last.y); x.lineTo(pt.x, pt.y); x.stroke(); });
+      d.last = pt;
+    } else if (d && d.tool === 'box') d.b = pt;
+    if (maskEd.tool === 'smart' && !d) hoverSmart(pt, e);
+    canvas.style.cursor = maskEd.tool === 'brush' ? 'none' : 'crosshair';
+    redraw();
+  }
+  function maskUp() {
+    const d = maskEd && maskEd.drag;
+    if (!d) return;
+    maskEd.drag = null;
+    if (d.tool === 'box') {
+      const x0 = Math.min(d.a.x, d.b.x), y0 = Math.min(d.a.y, d.b.y), w = Math.abs(d.b.x - d.a.x), h = Math.abs(d.b.y - d.a.y);
+      if (w > 1 && h > 1) paint(d.op, (x) => x.fillRect(x0, y0, w, h));
+    }
+    maskSave();
+  }
+  function maskClosePoly() {
+    if (!maskEd) return;
+    const pts = maskEd.poly.filter((p, i, a) => i === 0 || Math.hypot(p.x - a[i - 1].x, p.y - a[i - 1].y) > 2 / zoomScale());
+    maskEd.poly = [];
+    if (pts.length >= 3) {
+      paint(maskEd.polyOp || 'add', (x) => { x.beginPath(); pts.forEach((p, i) => i ? x.lineTo(p.x, p.y) : x.moveTo(p.x, p.y)); x.closePath(); x.fill(); });
+      maskSave();
+    } else redraw();
+  }
+  // Smart select: guess the object under the mouse once it rests briefly.
+  let smartTimer = null, smartBusy = false, smartId = 0;
+  function hoverSmart(pt, e) {
+    clearTimeout(smartTimer);
+    const ph = photo();
+    if (maskEd.preview && Math.hypot(pt.x - maskEd.preview.pt.x, pt.y - maskEd.preview.pt.y) > 12 / zoomScale()) maskEd.preview = null;
+    if (maskEd.preview) { maskEd.preview.op = maskOp(e); return; }
+    if (pt.x < 0 || pt.y < 0 || pt.x > ph.W || pt.y > ph.H) return;
+    const op = maskOp(e);
+    smartTimer = setTimeout(() => runSmart(pt, op).catch(() => {}), 110);
+  }
+  async function runSmart(pt, op) {
+    if (!maskEd || smartBusy) return null;
+    const a = assets.get(maskEd.name), ph = photo();
+    if (!a || !ph) return null;
+    smartBusy = true;
+    const me = maskEd;
+    try {
+      const c = await DT.mask.segment(smartKey(), a.bitmap, pt.x / ph.W, pt.y / ph.H);
+      if (maskEd !== me) return null;
+      if (me.status && /Studying|Downloading/.test(me.status)) maskStatus('Smart select ready.');
+      me.preview = { pt, canvas: c, op, id: ++smartId };
+      redraw();
+      return me.preview;
+    } catch (e) {
+      console.error(e);
+      if (maskEd === me) maskStatus('Smart select couldn’t load (' + e.message + '). Use the brush, box or line tools.');
+      return null;
+    } finally { smartBusy = false; }
+  }
+  async function applySmart(pt, op) {
+    let p = maskEd.preview;
+    if (!p || Math.hypot(pt.x - p.pt.x, pt.y - p.pt.y) > 12 / zoomScale()) p = await runSmart(pt, op);
+    if (!p || !maskEd) return;
+    const ph = photo();
+    paint(op, (x) => { x.imageSmoothingEnabled = true; x.drawImage(p.canvas, 0, 0, ph.W, ph.H); });
+    maskEd.preview = null;
+    maskSave();
+  }
+  // Screen-only extras while masking: brush ring, box and shape in progress.
+  function drawMaskOverlay() {
+    const z = zoomScale(), m = maskEd, c = m.cursor;
+    ctx.save();
+    ctx.lineWidth = 1.5 / z;
+    const col = (op) => op === 'remove' ? '#facc15' : '#38bdf8';
+    if (m.tool === 'brush' && c) {
+      ctx.strokeStyle = col(m.drag ? m.drag.op : (m.alt ? 'remove' : 'add'));
+      ctx.beginPath(); ctx.arc(c.x, c.y, m.size / z / 2, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (m.drag && m.drag.tool === 'box') {
+      const d = m.drag;
+      ctx.strokeStyle = col(d.op); ctx.setLineDash([5 / z, 4 / z]);
+      ctx.strokeRect(Math.min(d.a.x, d.b.x), Math.min(d.a.y, d.b.y), Math.abs(d.b.x - d.a.x), Math.abs(d.b.y - d.a.y));
+    }
+    if (m.tool === 'line' && m.poly.length) {
+      ctx.strokeStyle = col(m.polyOp); ctx.setLineDash([5 / z, 4 / z]);
+      ctx.beginPath(); m.poly.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+      if (c) ctx.lineTo(c.x, c.y);
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#fff';
+      for (const p of m.poly) { ctx.beginPath(); ctx.arc(p.x, p.y, 3.5 / z, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    }
+    ctx.restore();
+  }
   function addCustomAt(pt) {
     endMode();
     const ph = photo();
@@ -1564,6 +1788,12 @@
       ${L && sel && sel.vertex != null && L.ring[sel.vertex] ? `<div class="btn-col"><p class="hint"><b>Corner selected.</b></p><button class="btn block" data-act="lot-del-corner">Delete this corner</button></div>` : ''}
       ${L && sel && sel.edge != null && L.ring[sel.edge] ? `<div class="btn-col"><p class="hint"><b>Side selected.</b></p><button class="btn block" data-act="lot-toggle-side">${L.ring[sel.edge][2] ? 'Bring this side back' : 'Delete this side'}</button></div>` : ''}
       ${L && L.ring.some(c => c[2]) ? '<button class="btn block" data-act="lot-all-sides">Bring back all deleted sides</button>' : ''}
+      ${L ? `<h3 class="sec">Pass behind the house &amp; trees</h3>
+        <p class="hint">Mark what the lot lines should go <i>behind</i> on this photo (house, trees, pool…). Callouts always stay in front.${photo() && photo().lotMask ? ' <b>This photo has a mask.</b>' : ''}</p>
+        <div class="btn-col">
+          <button class="btn block" data-act="mask-edit" ${photo() && !photo().ground && S.style.showLot ? '' : 'disabled'}>${photo() && photo().lotMask ? 'Edit the mask on this photo' : 'Mask this photo…'}</button>
+          ${photo() && photo().lotMask ? '<button class="btn block subtle" data-act="mask-clear">Clear the mask on this photo</button>' : ''}
+        </div>` : ''}
       <ul class="tips"><li>Drag a <b>corner</b> to move it (on any photo; all photos update).</li><li>Drag a small <b>middle handle</b> to add a corner.</li><li>Click a <b>corner</b> or a <b>side</b>, then press <b>Delete</b> to remove it. Deleted sides show as a faint dashed line while editing; click one and press Delete again to bring it back.</li><li><b>Scroll out</b> past the edge of the photo to reach corners that are out of frame.</li></ul>
       <p class="hint">Automatic lookup uses county appraisal district maps (${esc(PL.LOT_COVERAGE)}). If it picks the wrong lot, drag the house pin onto the house and use “Find the lot under the house pin”, or draw by hand.</p>
       <h3 class="sec">Look</h3>
@@ -1890,6 +2120,8 @@
       case 'lot-delete': S.lot = null; sel = null; break;
       case 'lot-del-corner': deleteLotCorner(sel.vertex); return;
       case 'lot-toggle-side': toggleLotSide(sel.edge); return;
+      case 'mask-edit': startMask(); return;
+      case 'mask-clear': delete ph.lotMask; if (mode === 'mask') maskSync(); break;
       case 'lot-all-sides': for (const c of S.lot.ring) c.length = 2; S.lot.edited = true; break;
       case 'align-house': {
         const targets = alignTargets(ph);
@@ -2303,6 +2535,17 @@
     if (mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if (mod && e.key.toLowerCase() === 'y' && !typing) { e.preventDefault(); redo(); return; }
     if (typing) return;
+    if (mode === 'mask' && maskEd) {
+      if (e.key === ' ') { spaceHeld = true; canvas.style.cursor = 'grab'; e.preventDefault(); return; }
+      if (e.key === 'Escape') { if (maskEd.poly.length) { maskEd.poly = []; redraw(); } else endMode(); return; }
+      if (e.key === 'Enter') { maskClosePoly(); return; }
+      if ((e.key === 'Backspace' || e.key === 'Delete') && maskEd.poly.length) { e.preventDefault(); maskEd.poly.pop(); redraw(); return; }
+      const tk = { s: 'smart', b: 'brush', r: 'box', l: 'line' }[e.key.toLowerCase()];
+      if (tk && !mod) { setMaskTool(tk); return; }
+      if (e.key === '[' || e.key === ']') { maskEd.size = Math.max(4, Math.min(160, Math.round(maskEd.size * (e.key === ']' ? 1.25 : 0.8)))); renderMaskBar(); redraw(); return; }
+      if (e.key === 'Alt' || e.key === 'Shift') { maskEd.alt = e.altKey; if (maskEd.preview) maskEd.preview.op = maskOp(e); redraw(); }
+      return;
+    }
     if (e.key === 'Escape') { if (mode) { drawPts = []; endMode(); redraw(); } else select(null); return; }
     if (e.key === 'Enter' && mode === 'drawLot') { finishLot(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && mode === 'drawLot') { e.preventDefault(); drawPts.pop(); redraw(); return; }
@@ -2318,6 +2561,11 @@
       commit();
       renderAll();
     }
+  });
+
+  document.addEventListener('keyup', (e) => {
+    if (e.key === ' ') { spaceHeld = false; if (mode === 'mask') canvas.style.cursor = 'crosshair'; }
+    if (mode === 'mask' && maskEd && (e.key === 'Alt' || e.key === 'Shift')) { maskEd.alt = e.altKey; if (maskEd.preview) maskEd.preview.op = maskOp(e); redraw(); }
   });
 
   // ---------------- Save / open project ----------------
@@ -2388,7 +2636,8 @@
     c.width = ph.W; c.height = ph.H;
     const x = c.getContext('2d');
     x.imageSmoothingQuality = 'high';
-    RD.drawScene(x, buildScene(i), full, { logoImages });
+    const lotMask = ph.lotMask ? await DT.mask.load(ph.lotMask).catch(() => null) : null;
+    RD.drawScene(x, buildScene(i), full, { logoImages, lotMask, lotMaskVer: 'export' });
     full.close && full.close();
     const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.93));
     c.width = c.height = 0;
