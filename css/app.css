@@ -310,3 +310,17 @@ body.dropping .canvas-wrap { outline: 3px dashed var(--accent); outline-offset: 
 /* Mask: on / off the property */
 .mask-bar .seg.kind button.active { background: #ef4444; color: #fff; }
 .mask-bar .seg.kind button.active.off { background: #3b82f6; color: #fff; }
+
+/* Find a place */
+.place-search input[type=search] { width: 100%; }
+.search-results { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.search-results .sr { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: 0; border-radius: 6px; padding: 5px 6px; color: inherit; font: inherit; cursor: pointer; }
+.search-results .sr:hover { background: var(--panel-2); }
+.search-results .sr .ico { flex: none; }
+.search-results .sr-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.search-results .sr-name small { display: block; font-weight: 400; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-results .sr-add { font-size: 11px; font-weight: 700; color: var(--accent); }
+.search-results .sr-head { margin: 6px 0 2px; }
+.search-results #srMap { margin-top: 4px; }
+.cat-list li.flash { animation: srflash 1.6s ease-out; }
+@keyframes srflash { 0%, 40% { background: rgba(56,189,248,.35); } 100% { background: transparent; } }

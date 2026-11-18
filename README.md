@@ -85,6 +85,10 @@ hosted version behaves.)
      Mask marks on the property stay in color (a roof poking past the lot);
      marks off the property go gray (a neighbor's tree inside the lot).
      "How gray" and "Darken surroundings" are saved with presets.
+   - **Find a place** (bottom of the list): type a name to find any place
+     this property already has, even ones that are off or out of range;
+     clicking one turns it on and shows it in the list. **Search the map**
+     looks further and adds the pick to My callouts.
    - **Disclaimers** (Style tab): the lot-lines note and an optional school
      note ("Buyer to verify school assignment") stack in one corner.
 5. **Export this photo** or **Export all** (a .zip for several photos).

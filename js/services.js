@@ -76,6 +76,28 @@
     return { lat: hit.lat, lon: hit.lon, exact: hit.exact, label: hit.r.display_name, address: formatAddress(a, nice) };
   }
 
+  // Places by name near the property (for "Find a place"), closest first.
+  async function searchPlaces(q, near) {
+    const out = [], seen = new Set();
+    const add = (rows) => {
+      for (const r of rows || []) {
+        const name = r.name || (r.display_name || '').split(',')[0];
+        const lat = parseFloat(r.lat), lon = parseFloat(r.lon);
+        const k = name.toLowerCase() + Math.round(lat * 500) + Math.round(lon * 500);
+        if (!name || seen.has(k)) continue;
+        seen.add(k);
+        const a = r.address || {};
+        out.push({ name, lat, lon, kind: (r.type || '').replace(/_/g, ' '), where: placeOf(a), label: r.display_name, d: near ? dist({ lat, lon }, near) : 0 });
+      }
+    };
+    if (near) {
+      const vb = `${near.lon - 0.3},${near.lat + 0.25},${near.lon + 0.3},${near.lat - 0.25}`;
+      add(await nominatim('search', { q, countrycodes: 'us', limit: '10', viewbox: vb, bounded: '1' }));
+    }
+    if (out.length < 3) add(await nominatim('search', { q: q + ', Texas', countrycodes: 'us', limit: '8', viewbox: '-98.6,34.2,-95.8,31.8', bounded: '1' }));
+    return out.sort((a, b) => a.d - b.d).slice(0, 8);
+  }
+
   // ---- Driving distance/time ----
   // Starts with the free public OSRM server. A Google Routes provider can be
   // added here later with the same function shape.
@@ -117,5 +139,5 @@
     },
   };
 
-  DT.services = { geocode, geocodeNear, reverseGeocode, routing, store };
+  DT.services = {geocode, geocodeNear, reverseGeocode, searchPlaces, routing, store };
 })(window.DT = window.DT || {});

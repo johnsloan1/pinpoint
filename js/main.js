@@ -1580,6 +1580,112 @@
     }).join('');
   }
 
+  // ---- Find a place (bottom of the list) ----
+  // Searches the places this property already has; "Search the map" looks
+  // further (anything on OpenStreetMap near the property).
+  const normQ = (x) => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  let mapHits = null, mapQ = '', mapBusy = false;
+  function placeStatus(p, cat, idx) {
+    if (cat.used === false) return 'type turned off';
+    const ins = idx.photosOf[p.id] || [];
+    const on = cat.enabled && p.enabled !== false;
+    if (!S.photos.length) return on ? 'on' : 'off';
+    if (!ins.length) return 'not in any photo';
+    if (!inRange(p, cat)) return `in ${ins.length} photo${ins.length > 1 ? 's' : ''}, past ${cat.maxMi} mi`;
+    return on ? `on · ${ins.length} photo${ins.length > 1 ? 's' : ''}` : `off · in ${ins.length} photo${ins.length > 1 ? 's' : ''}`;
+  }
+  function renderSearch() {
+    const box = $('#searchResults');
+    const q = normQ($('#placeSearch').value);
+    if (!q) { box.innerHTML = ''; mapHits = null; return; }
+    const words = q.split(' ');
+    const idx = jobIndex();
+    // Every place this property has, even in types that are off.
+    const hits = [];
+    for (const p of Object.values(S.places)) {
+      const cat = catById(p.cat);
+      if (!cat) continue;
+      const n = normQ((p.title ?? p.name) + ' ' + (p.title != null ? p.name : ''));
+      if (!words.every(w => n.includes(w))) continue;
+      const starts = n.startsWith(q) ? 0 : 1;
+      hits.push({ p, cat, rank: starts * 1000 + (p.distMi ?? 0) });
+    }
+    hits.sort((a, b) => a.rank - b.rank);
+    const local = hits.slice(0, 8).map(({ p, cat }) => {
+      const st = placeStatus(p, cat, idx);
+      return `<button class="sr" data-sr-place="${esc(p.id)}" title="Show it in the list and turn it on">
+        ${iconHtml(p.icon || p.kindIcon || cat.icon, p.iconColor || cat.color)}
+        <span class="sr-name">${esc(p.title ?? p.name)}<small>${esc(cat.name)}${p.distMi != null && p.source !== 'custom' ? ' · ' + fmtMi(p.distMi) : ''} · ${esc(st)}</small></span></button>`;
+    }).join('');
+    const showMap = mapHits && mapQ === q;
+    const mapRows = showMap ? (mapHits.length ? mapHits.map((h, i) => `<button class="sr" data-sr-map="${i}" title="${esc(h.label)}">
+        <span class="ico" style="background:#64748b">${IC.svg('star')}</span>
+        <span class="sr-name">${esc(h.name)}<small>${esc([h.kind, h.where, S.house ? fmtMi(h.d / MI) : ''].filter(Boolean).join(' · '))}</small></span><span class="sr-add">Add</span></button>`).join('')
+      : '<p class="hint">Nothing on the map by that name nearby.</p>') : '';
+    box.innerHTML = (local || (!showMap ? `<p class="hint">Not in this property’s places${Object.keys(S.places).length ? '' : ' (click Find places first)'}.</p>` : ''))
+      + (showMap ? `<p class="lbl sr-head">On the map</p>${mapRows}` : `<button class="btn small block" id="srMap" ${mapBusy ? 'disabled' : ''}>${mapBusy ? 'Searching…' : `Search the map for “${esc($('#placeSearch').value.trim())}”`}</button>`);
+  }
+  async function searchMap() {
+    const raw = $('#placeSearch').value.trim();
+    if (!raw || mapBusy) return;
+    mapBusy = true; renderSearch();
+    try {
+      const near = S.house || (() => { const c = S.photos.map(x => camFor(x)).find(Boolean); return c && { lat: c.lat, lon: c.lon }; })();
+      mapHits = await SV.searchPlaces(raw, near);
+      mapQ = normQ(raw);
+    } catch (e) {
+      console.error(e);
+      setStatus('Map search failed: ' + e.message, 'error');
+    } finally { mapBusy = false; renderSearch(); }
+  }
+  // Turn a place on and show it in the list.
+  function revealPlace(p) {
+    const cat = catById(p.cat);
+    if (!cat) return;
+    if (cat.used === false) cat.used = true; // this property only
+    cat.enabled = true; cat.open = true;
+    p.enabled = true;
+    if (!inRange(p, cat)) p.always = true;
+    const ph = photo();
+    if (sideView === 'photo' && ph && !shownOn(p, ph)) setShownOn(p, ph, true);
+    commit();
+    select({ kind: 'place', id: p.id });
+    renderAll();
+    const ins = jobIndex().photosOf[p.id] || [];
+    if (S.photos.length && !ins.length) setStatus(`“${p.title ?? p.name}” is turned on, but it isn’t in view in any of these photos.`, 'error');
+    else setStatus(`“${p.title ?? p.name}” is on${S.photos.length ? ` (in ${ins.length} photo${ins.length > 1 ? 's' : ''})` : ''}.`, 'ok');
+    const li = document.querySelector(`#catList li[data-id="${CSS.escape(p.id)}"]`);
+    if (li) { li.scrollIntoView({ block: 'center', behavior: 'smooth' }); li.classList.add('flash'); setTimeout(() => li.classList.remove('flash'), 1600); }
+  }
+  // Add a place found on the map as one of My callouts.
+  function addMapHit(h) {
+    const near = Object.values(S.places).find(p => p.lat != null && normQ(p.title ?? p.name) === normQ(h.name) && PJ.distM(p.lat, p.lon, h.lat, h.lon) < 300);
+    if (near) { revealPlace(near); return; }
+    const p = { id: 'mine:' + Date.now().toString(36), source: 'mine', cat: 'custom', name: h.name, title: h.name, enabled: true,
+      lat: h.lat, lon: h.lon, route: { lat: h.lat, lon: h.lon }, distMi: S.house ? PJ.distM(S.house.lat, S.house.lon, h.lat, h.lon) / MI : 0 };
+    S.places[p.id] = p;
+    revealPlace(p);
+    maybeFetchDrive();
+    renderSearch();
+  }
+  let searchT = null;
+  $('#placeSearch').addEventListener('input', () => { clearTimeout(searchT); searchT = setTimeout(renderSearch, 120); });
+  $('#placeSearch').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const first = $('#searchResults .sr');
+      if (first) first.click(); else searchMap();
+    }
+    if (e.key === 'Escape') { e.target.value = ''; renderSearch(); }
+  });
+  $('#searchResults').addEventListener('click', (e) => {
+    if (e.target.closest('#srMap')) { searchMap(); return; }
+    const a = e.target.closest('[data-sr-place]');
+    if (a) { const p = S.places[a.dataset.srPlace]; if (p) revealPlace(p); renderSearch(); return; }
+    const m = e.target.closest('[data-sr-map]');
+    if (m && mapHits) addMapHit(mapHits[+m.dataset.srMap]);
+  });
+
   // ---- Reordering categories (drag the ⋮⋮ handle) ----
   let catOrder = [];
   function applyCatOrder() {
