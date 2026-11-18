@@ -2749,6 +2749,9 @@
   const isJpg = (n) => /\.jpe?g$/i.test(n);
   function openDropbox() { dbx.err = null; renderDropbox(); $('#dbxDlg').showModal(); if (DB.connected && DB.root && !dbx.folders) loadFolders(); }
   $('#btnDropbox').addEventListener('click', openDropbox);
+  $('#emptyAddPhotos').addEventListener('click', () => $('#fileInput').click());
+  $('#emptyAddFolder').addEventListener('click', () => $('#folderInput').click());
+  $('#emptyDropbox').addEventListener('click', openDropbox);
   const fmtDay = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: new Date(iso).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }) : '';
   function renderDropbox() {
     const el = $('#dbxBody');
