@@ -35,7 +35,7 @@ LIST = [
     ('business', 'Uptown Dallas', 'Uptown, Dallas, Texas', None),
     ('business', 'Dallas Galleria', 'Galleria Dallas, Texas', None),
     # Big venues missing from OpenStreetMap's stadium/arena tags.
-    ('attraction', 'Dickies Arena', '1911 Montgomery Street, Fort Worth, Texas', None),
+    ('attraction', 'Ariat Arena', '1911 Montgomery Street, Fort Worth, Texas', None),
 ]
 
 
