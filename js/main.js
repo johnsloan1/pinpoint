@@ -836,6 +836,7 @@
     const zb = $('#zoomFit');
     zb.hidden = Math.abs(view.z - 1) < 0.001;
     zb.textContent = Math.round(view.z * 100) + '% · Fit';
+    $('#pinPlace').hidden = !(S.house && S.style.showPin && !scene.house && !mode && !ph.ground);
     const dpr = window.devicePixelRatio || 1;
     const cssW = cw, cssH = ch;
     canvas.style.width = cssW + 'px';
@@ -956,6 +957,7 @@
     if (!scene) return;
     const pt = toImage(e);
     if (mode === 'addCustom') { addCustomAt(pt); return; }
+    if (mode === 'placePin') { placePinAt(pt); return; }
     if (mode === 'drawLot') { addLotPoint(pt); return; }
     if (mode === 'mask') {
       if (spaceHeld || e.button === 1) { drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: true }; canvas.setPointerCapture(e.pointerId); return; }
@@ -995,7 +997,7 @@
     if (mode === 'mask' && !(drag && drag.pan)) { maskMove(e, toImage(e)); return; }
     const pt = toImage(e);
     if (!drag) {
-      if (mode === 'addCustom') { canvas.style.cursor = 'crosshair'; return; }
+      if (mode === 'addCustom' || mode === 'placePin') { canvas.style.cursor = 'crosshair'; return; }
       const hit = hitTest(pt);
       canvas.style.cursor = hit ? (hit.type === 'box' ? 'grab' : 'move') : view.z > 1 ? 'grab' : 'default';
       return;
@@ -1202,6 +1204,29 @@
     h.innerHTML = 'Click the spot on the photo where the place is. <button class="btn small" id="cancelMode">Cancel</button>';
     $('#cancelMode').onclick = endMode;
   }
+  // House pin: click the photo to put it where the house is (for when it's
+  // off the edge of the photo or the camera angle puts it in the wrong spot).
+  function startPlacePin() {
+    if (!photo()) { setStatus('Add a photo first.', 'error'); return; }
+    if (!S.house) { setStatus('Find the property address first.', 'error'); return; }
+    mode = 'placePin';
+    const h = $('#modeHint');
+    h.hidden = false;
+    h.innerHTML = 'Click the house on the photo to put the pin there. <button class="btn small" id="cancelMode">Cancel</button>';
+    $('#cancelMode').onclick = () => { endMode(); redraw(); };
+    redraw();
+  }
+  function placePinAt(pt) {
+    const ph = photo();
+    const cl = (v) => Math.min(1, Math.max(0, v));
+    ph.house = { x: cl(pt.x / ph.W), y: cl(pt.y / ph.H) };
+    if (!S.style.showPin) S.style.showPin = true;
+    endMode();
+    sel = { kind: 'house' };
+    commit(); renderAll();
+    setStatus('House pin placed. Drag it to fine-tune.', 'ok');
+  }
+  $('#pinPlace').addEventListener('click', startPlacePin);
   function endMode() { const wasMask = mode === 'mask'; mode = null; maskEd = null; $('#modeHint').hidden = true; canvas.style.cursor = 'default'; if (wasMask) { renderInspector(); redraw(); } }
 
   // ---- Lot-line mask: what the lot lines pass behind (house, trees…) ----
@@ -1869,7 +1894,11 @@
   function itemTab() {
     if (!sel) {
       return `<div class="hint-card"><h3>Editing</h3><p>Click a callout on the photo, or <b>⋯</b> next to a place in the list, to change its text, icon and colors.</p>
-        <ul class="tips"><li>Drag a <b>box</b> to move it.</li><li>Drag the <b>dot</b> to move where the line points.</li><li>Drag the <b>house pin</b> to move it.</li><li><b>Scroll</b> to zoom in and out; drag an empty spot to move around; double-click to fit.</li><li><b>⌘Z</b> undo · <b>⇧⌘Z</b> redo · <b>Delete</b> hides the selected callout (on this photo in “This photo” view, everywhere in “Whole job” view).</li></ul></div>`;
+        <ul class="tips"><li>Drag a <b>box</b> to move it.</li><li>Drag the <b>dot</b> to move where the line points.</li><li>Drag the <b>house pin</b> to move it.</li><li><b>Scroll</b> to zoom in and out; drag an empty spot to move around; double-click to fit.</li><li><b>⌘Z</b> undo · <b>⇧⌘Z</b> redo · <b>Delete</b> hides the selected callout (on this photo in “This photo” view, everywhere in “Whole job” view).</li></ul></div>
+        ${photo() ? `<div class="btn-col">
+          <button class="btn block" data-act="house-place">Place the house pin by clicking the photo</button>
+          <button class="btn block subtle" data-act="reset-photo" title="Undo every change you made on this photo only">Reset all changes on this photo</button>
+        </div>` : ''}`;
     }
     if (sel.kind === 'house') {
       return `<h3 class="sec">House marker</h3>
@@ -1877,6 +1906,7 @@
         ${ui.color('Pin color', 'style.pinColor', '#e11d48')}
         ${ui.range('Pin size', 'style.pinSize', 20, 160, 1)}
         <div class="btn-col">
+          <button class="btn block" data-act="house-place">Place the pin by clicking the photo</button>
           <button class="btn block" data-act="house-reset">Move pin back to the address location</button>
           ${alignButton(photo())}
         </div>
@@ -2081,6 +2111,7 @@
         ${alignButton(ph)}
         <button class="btn block" data-act="copy-adj" ${S.photos.length > 1 ? '' : 'disabled'}>Copy these settings to all photos</button>
         <button class="btn block subtle" data-act="reset-adj">Reset camera settings</button>
+        <button class="btn block subtle" data-act="reset-photo" title="Camera, pin, callout positions, shown/hidden places, lot lines and mask on this photo">Reset all changes on this photo</button>
         <button class="btn block subtle" data-act="make-ground" title="Stop placing callouts automatically on this photo">Treat as eye-level (add places by hand)</button>
       </div>`;
     return html;
@@ -2276,6 +2307,17 @@
         sel = null;
         break;
       case 'house-reset': ph.house = null; break;
+      case 'house-place': startPlacePin(); return;
+      case 'reset-photo': {
+        if (!ph) return;
+        if (!confirm('Reset everything you changed on this photo? Camera settings, the house pin, callout positions, places shown or hidden here, lot lines and mask all go back to how they started. (⌘Z undoes this.)')) return;
+        const fresh = newPhoto(ph.name, ph.W, ph.H, ph.meta);
+        ph.adj = fresh.adj; ph.layout = {}; ph.hidden = {}; ph.house = null; ph.ground = fresh.ground;
+        delete ph.lot; delete ph.lotMask;
+        sel = null;
+        setStatus('This photo is back to how it started.', 'ok');
+        break;
+      }
       case 'make-drone': ph.ground = false; ph.adj.manual = true; break;
       case 'make-ground': ph.ground = true; break;
       case 'lot-edit': select({ kind: 'lot' }); if (!curLot() && S.house) autoFindLot(); return;

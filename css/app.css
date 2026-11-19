@@ -324,3 +324,7 @@ body.dropping .canvas-wrap { outline: 3px dashed var(--accent); outline-offset: 
 .search-results #srMap { margin-top: 4px; }
 .cat-list li.flash { animation: srflash 1.6s ease-out; }
 @keyframes srflash { 0%, 40% { background: rgba(56,189,248,.35); } 100% { background: transparent; } }
+
+.pin-badge { position: absolute; left: 18px; bottom: 16px; background: rgba(17,19,23,.88); color: var(--text); border: 1px solid #e11d48;
+  border-radius: 999px; padding: 6px 12px; font: 600 12px/1.2 Inter, system-ui, sans-serif; cursor: pointer; z-index: 3; }
+.pin-badge:hover { background: #e11d48; color: #fff; }

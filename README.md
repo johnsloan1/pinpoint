@@ -55,10 +55,15 @@ hosted version behaves.)
      in a category's settings). The order is remembered for every job.
 4. Fine-tune:
    - Drag a **box** to move it. Drag the **dot** to move where the line points.
-   - Drag the **house pin**. If *everything* is slightly off (drone compasses
+   - Drag the **house pin**. If the house is off the edge of the photo, click
+     **📍 House pin isn't showing · Place it** (bottom left of the photo), then
+     click the house. If *everything* is slightly off (drone compasses
      drift a few degrees), drag the pin onto the house, then use **Camera →
      Line up using the house pin**.
    - Click a callout (or **⋯** in the list) to change text, icon and colors.
+   - **Reset all changes on this photo** (Edit tab with nothing selected, or
+     Camera tab) puts the camera, pin, callout positions, shown/hidden places,
+     lot lines and mask on that photo back to the start. ⌘Z undoes it.
    - **⌘Z** undo, **⇧⌘Z** redo, **Delete** hides the selected callout.
    - **Scroll** over the photo to zoom (never smaller than the whole photo);
      drag an empty spot to move around; double-click to fit.
