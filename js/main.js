@@ -447,7 +447,9 @@
     try {
       let g = null;
       if (st.addrHint) g = await SV.geocodeNear(st.addrHint, near);
-      if (g) {
+      const lot = g && await houseFromLot(st.addrHint, g);
+      if (lot) setJobAddress(st, g.address, lot, g.label, null);
+      else if (g) {
         let house = { lat: g.lat, lon: g.lon }, note = null;
         if (!g.exact && aim && PJ.distM(aim.lat, aim.lon, g.lat, g.lon) < 400) { house = aim; note = 'found on the street; the pin is placed where the drone was aimed'; }
         else if (!g.exact) note = 'found on the street but not the exact house';
@@ -460,6 +462,14 @@
     if (st.addrState === 'looking') st.addrState = null;
     if (st === S) { syncGlobalControls(); renderAll(); }
     renderJobBar();
+  }
+  // The street map's spot for a house number can be on the wrong lot, so
+  // the appraisal district's lot with that address is used when found.
+  async function houseFromLot(text, g) {
+    try {
+      const hit = await PL.findAddressLot(text || g.address, g.lat, g.lon);
+      return hit && hit.d < 1500 ? { lat: hit.lat, lon: hit.lon } : null;
+    } catch (e) { console.warn('Lot address lookup failed', e); return null; }
   }
   function setJobAddress(st, address, house, label, note) {
     st.address = address;
@@ -505,6 +515,8 @@
     try {
       const g = await SV.geocode(addr);
       if (!g) { setStatus('Couldn’t find that address. Check the spelling, or add the city and ZIP.', 'error'); return; }
+      const lot = await houseFromLot(addr, g);
+      if (lot) { g.lat = lot.lat; g.lon = lot.lon; }
       const moved = S.house && PJ.distM(S.house.lat, S.house.lon, g.lat, g.lon) > 200;
       S.house = { lat: g.lat, lon: g.lon, label: g.label };
       S.addrState = 'ok'; S.addrNote = null;

@@ -628,6 +628,101 @@
     return null;
   }
 
+  // The house's real spot, from the appraisal district's address for each
+  // lot. Street maps often put a house number on the wrong lot (in one test
+  // "7" landed on #9, 110 m away), so the lot with that exact address is
+  // looked for around the street map's guess. Only the address and outline
+  // are read.
+  const SUFFIX = /\b(CT|COURT|DR|DRIVE|LN|LANE|RD|ROAD|ST|STREET|AVE|AVENUE|BLVD|BOULEVARD|CIR|CIRCLE|TRL|TRAIL|PKWY|PARKWAY|PL|PLACE|WAY|TER|TERRACE|LOOP|PATH|PT|POINT|COVE|CV|RUN|XING|CROSSING|HWY|N|S|E|W|NORTH|SOUTH|EAST|WEST)\b/g;
+  const streetKey = (t) => String(t || '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').replace(SUFFIX, ' ').replace(/\s+/g, ' ').trim();
+  function parseStreet(text) {
+    const first = String(text || '').split(',')[0].trim();
+    const m = first.match(/^(\d+[A-Z]?)\s+(.+)$/i);
+    return m ? { num: m[1].toUpperCase(), key: streetKey(m[2]) } : null;
+  }
+  // A spot inside the lot: its middle, or the middle of a line across it
+  // for odd shapes.
+  function pointInside(ring) {
+    let A = 0, cx = 0, cy = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [x0, y0] = ring[j], [x1, y1] = ring[i], c = x0 * y1 - x1 * y0;
+      A += c; cx += (x0 + x1) * c; cy += (y0 + y1) * c;
+    }
+    if (Math.abs(A) > 1e-14) { cx /= 3 * A; cy /= 3 * A; if (inRing(ring, cx, cy)) return [cx, cy]; }
+    const ys = ring.map(p => p[1]), y = (Math.min(...ys) + Math.max(...ys)) / 2, xs = [];
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > y) !== (yj > y)) xs.push(xi + (y - yi) * (xj - xi) / (yj - yi));
+    }
+    xs.sort((a, b) => a - b);
+    return xs.length >= 2 ? [(xs[0] + xs[1]) / 2, y] : ring[0];
+  }
+  async function biggestBuilding(ring) {
+    const xs = ring.map(p => p[0]), ys = ring.map(p => p[1]);
+    const q = `[out:json][timeout:15];way["building"](${Math.min(...ys)},${Math.min(...xs)},${Math.max(...ys)},${Math.max(...xs)});out geom;`;
+    // A small question, so ask every map server at once and use the first answer.
+    let data = await cacheGet(q);
+    if (!data) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      try {
+        data = await Promise.any(OVERPASS.map(async (url) => {
+          const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'data=' + encodeURIComponent(q), signal: ctrl.signal });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        }));
+        cachePut(q, data);
+      } finally { clearTimeout(timer); ctrl.abort(); }
+    }
+    let best = null;
+    for (const w of (data && data.elements) || []) {
+      const g = (w.geometry || []).map(n => [n.lon, n.lat]);
+      if (g.length < 3) continue;
+      const [cx, cy] = pointInside(g);
+      if (!inRing(ring, cx, cy)) continue;
+      const lat0 = g[0][1], lon0 = g[0][0];
+      const area = Math.abs(ringArea(g.map(([x, y]) => [y, x]), lat0, lon0));
+      if (!best || area > best.area) best = { lat: cy, lon: cx, area };
+    }
+    return best && best.area > 40 ? best : null; // skip sheds
+  }
+  async function findAddressLot(text, lat, lon) {
+    const want = parseStreet(text);
+    if (!want || !want.key) return null;
+    const src = LOT_SOURCES[0];
+    for (const e of [0.003, 0.009]) { // about 300 m, then 1 km around the guess
+      const p = new URLSearchParams({ geometry: JSON.stringify({ xmin: lon - e, ymin: lat - e, xmax: lon + e, ymax: lat + e }),
+        geometryType: 'esriGeometryEnvelope', sr: '4326', layers: 'all:0', tolerance: '0',
+        mapExtent: `${lon - e},${lat - e},${lon + e},${lat + e}`, imageDisplay: '400,400,96', returnGeometry: 'true', f: 'json' });
+      const d = await getJson(src.url + '?' + p, 20000);
+      if (!d || !d.results) return null;
+      let best = null;
+      for (const r of d.results) {
+        const a = r.attributes || {}, addr = String(a.SITUS_ADDR || '').toUpperCase();
+        const num = String(a.SITUS_NUM && a.SITUS_NUM !== 'Null' ? a.SITUS_NUM : addr.split(' ')[0]).toUpperCase();
+        if (num !== want.num) continue;
+        const k = streetKey([a.SITUS_STRE, a.SITUS_ST_1, a.SITUS_ST_2].filter(v => v && v !== 'Null').join(' ') || addr.split(',')[0].replace(/^\S+\s+/, ''));
+        if (!k || !(k === want.key || k.includes(want.key) || want.key.includes(k))) continue;
+        const rings = r.geometry && r.geometry.rings;
+        if (!rings || !rings.length) continue;
+        const ring = rings.slice().sort((x, y) => y.length - x.length)[0];
+        const [x, y] = pointInside(ring);
+        const dm = P().distM(lat, lon, y, x);
+        if (!best || dm < best.d) best = { lat: y, lon: x, d: dm, ring };
+      }
+      if (best) {
+        // On a big or long lot the middle can be far from the house, so use
+        // the biggest building on the lot when the map has one.
+        const h = await biggestBuilding(best.ring).catch(() => null);
+        if (h) { best.lat = h.lat; best.lon = h.lon; best.onBuilding = true; }
+        delete best.ring;
+        return best;
+      }
+    }
+    return null;
+  }
+
   async function findLot(lat, lon) {
     for (const src of LOT_SOURCES) {
       try {
@@ -651,5 +746,5 @@
     // google: added in a later stage (mainly for retail), with a spending cap.
   };
 
-  DT.places = { MERGED, DEFAULT_CATEGORIES, ROAD_TYPES, providers, anchorFor, MI, loadManifest, landmarksNear, findLot, LOT_SOURCES, LOT_COVERAGE };
+  DT.places = { MERGED, DEFAULT_CATEGORIES, ROAD_TYPES, providers, anchorFor, MI, loadManifest, landmarksNear, findLot, findAddressLot, LOT_SOURCES, LOT_COVERAGE };
 })(window.DT = window.DT || {});

@@ -125,7 +125,10 @@ them. For now these (and My places) are saved in this browser. Google Drive stor
 
 ## Where the data comes from
 
-- Addresses: OpenStreetMap Nominatim (free).
+- Addresses: OpenStreetMap Nominatim (free). In Texas the house spot is
+  then checked against the appraisal district's lot with that address
+  (street maps sometimes put a house number on the neighbor's lot), and the
+  pin goes on the biggest building on that lot.
 - Places: OpenStreetMap. For DFW the app uses a **ready-made copy** stored
   with the app (`data/dfw`), so searches are instant and don't depend on
   the busy free map servers. It covers from the Red River (Gainesville,
