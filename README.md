@@ -96,8 +96,11 @@ hosted version behaves.)
      looks further and adds the pick to My callouts.
    - **Disclaimers** (Style tab): the lot-lines note and an optional school
      note ("Buyer to verify school assignment") stack in one corner.
-5. **Export this photo** or **Export all** (a .zip for several photos).
-   Files are named like `123 Main St - callouts 01.jpg`.
+5. **Export this photo** or **Export all**. In Chrome a Save window asks
+   where to put the photo (or, for Export all, which folder; each photo is
+   saved there as its own JPG). It remembers the last folder. Safari still
+   saves to Downloads (a .zip for several photos). Files are named like
+   `123 Main St - callouts 01.jpg`.
 
 **Several photos from one flight:** set up the callouts once. Every photo
 uses its own camera position, so each one is placed correctly. Your text,

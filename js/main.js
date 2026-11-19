@@ -2799,15 +2799,45 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
+  // "Save as" windows (Chrome and Edge). The window has to open right after
+  // the click, so it's asked for before the photo is rendered. Other
+  // browsers (Safari) fall back to the Downloads folder.
+  const canPick = typeof window.showSaveFilePicker === 'function' && window.self === window.top;
+  const isCancel = (e) => e && e.name === 'AbortError';
+  async function pickFile(name, kind) {
+    if (!canPick) return null;
+    const types = kind === 'json' ? [{ description: 'Pinpoint project', accept: { 'application/json': ['.json'] } }]
+      : kind === 'zip' ? [{ description: 'Zip file', accept: { 'application/zip': ['.zip'] } }]
+      : [{ description: 'JPEG photo', accept: { 'image/jpeg': ['.jpg', '.jpeg'] } }];
+    return window.showSaveFilePicker({ suggestedName: name, types, id: kind === 'json' ? 'pinpoint-project' : 'pinpoint-export', startIn: 'pictures' });
+  }
+  async function pickFolder() {
+    if (typeof window.showDirectoryPicker !== 'function' || window.self !== window.top) return null;
+    return window.showDirectoryPicker({ id: 'pinpoint-export', mode: 'readwrite', startIn: 'pictures' });
+  }
+  async function writeTo(handle, blob) {
+    const w = await handle.createWritable();
+    await w.write(blob);
+    await w.close();
+  }
   const round6 = (n) => Math.round(n * 1e6) / 1e6;
-  $('#btnSave').addEventListener('click', () => {
+  $('#btnSave').addEventListener('click', async () => {
+    const name = `${street()} - Pinpoint project.json`;
+    let fh = null;
+    try { fh = await pickFile(name, 'json'); } catch (e) { if (isCancel(e)) return; }
     const g = {};
     for (const [id, v] of geom) {
       const step = Math.max(1, Math.ceil(v.samples.length / 600));
       g[id] = { kind: v.kind, centroid: v.centroid.map(round6), samples: v.samples.filter((_, i) => i % step === 0).map(p => [round6(p[0]), round6(p[1])]) };
     }
     const data = { app: 'drone-tag', version: 1, savedAt: new Date().toISOString(), state: S, geom: g };
-    download(new Blob([JSON.stringify(data)], { type: 'application/json' }), `${street()} - Pinpoint project.json`);
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    if (fh) {
+      try { await writeTo(fh, blob); setStatus(`Project saved as “${fh.name}”. Open it later with Open, then add the same photos.`, 'ok'); }
+      catch (e) { setStatus('Saving failed: ' + e.message, 'error'); }
+      return;
+    }
+    download(blob, name);
     setStatus('Project saved to your Downloads. Open it later with Open, then add the same photos.', 'ok');
   });
   async function openProject(file) {
@@ -2878,8 +2908,15 @@
       try { await saveToDropbox([cur]); } catch (e) { setStatus('Saving to Dropbox failed: ' + e.message, 'error'); } finally { busy(null); }
       return;
     }
+    const i = cur;
+    let fh = null;
+    try { fh = await pickFile(exportName(i), 'jpg'); } catch (e) { if (isCancel(e)) return; }
     busy('Creating full-resolution JPG…');
-    try { download(await renderExport(cur), exportName(cur)); setStatus('Exported ' + exportName(cur), 'ok'); }
+    try {
+      const blob = await renderExport(i);
+      if (fh) { await writeTo(fh, blob); setStatus(`Saved “${fh.name}”.`, 'ok'); }
+      else { download(blob, exportName(i)); setStatus('Exported ' + exportName(i) + ' to Downloads.', 'ok'); }
+    }
     catch (e) { setStatus('Export failed: ' + e.message, 'error'); }
     finally { busy(null); }
   });
@@ -2890,8 +2927,34 @@
       try { await saveToDropbox(ready); } catch (e) { setStatus('Saving to Dropbox failed: ' + e.message, 'error'); } finally { busy(null); }
       return;
     }
+    // Pick where first: one photo → a Save window; several → a folder, and
+    // each photo is saved into it as its own JPG.
+    let fh = null, dir = null;
     try {
-      if (ready.length === 1) { busy('Creating full-resolution JPG…'); download(await renderExport(ready[0]), exportName(ready[0])); }
+      if (ready.length === 1) fh = await pickFile(exportName(ready[0]), 'jpg');
+      else dir = await pickFolder();
+    } catch (e) { if (isCancel(e)) return; }
+    if (dir) {
+      try {
+        const names = ready.map(exportName);
+        const exists = [];
+        for (const n of names) { try { await dir.getFileHandle(n); exists.push(n); } catch (_) {} }
+        if (exists.length && !confirm(`${exists.length} of these photos ${exists.length > 1 ? 'are' : 'is'} already in “${dir.name}”. Replace ${exists.length > 1 ? 'them' : 'it'}?`)) return;
+        for (let k = 0; k < ready.length; k++) {
+          busy(`Saving photo ${k + 1} of ${ready.length}…`);
+          await writeTo(await dir.getFileHandle(names[k], { create: true }), await renderExport(ready[k]));
+        }
+        setStatus(`Saved ${ready.length} photos to the “${dir.name}” folder.`, 'ok');
+      } catch (e) { setStatus('Export failed: ' + e.message, 'error'); }
+      finally { busy(null); }
+      return;
+    }
+    try {
+      if (ready.length === 1) {
+        busy('Creating full-resolution JPG…');
+        const blob = await renderExport(ready[0]);
+        if (fh) await writeTo(fh, blob); else download(blob, exportName(ready[0]));
+      }
       else {
         const zip = new JSZip();
         for (let k = 0; k < ready.length; k++) {
