@@ -2885,7 +2885,12 @@
   async function ensureFont() {
     try { await document.fonts.load(`${S.style.fontWeight} 40px "${S.style.font}"`); await document.fonts.load(`500 40px "${S.style.font}"`); } catch (e) { /* ignore */ }
   }
-  function exportName(i) { return `${street()} - callouts ${String(i + 1).padStart(2, '0')}.jpg`; }
+  // The photo's own file name plus "callout", e.g. "7 Main St 0268 callout.jpg".
+  function exportName(i) {
+    const ph = S.photos[i];
+    const base = ph && ph.name ? ph.name.split('/').pop().replace(/\.[^.]+$/, '') : `${street()} ${String(i + 1).padStart(2, '0')}`;
+    return `${base} callout.jpg`;
+  }
 
   async function renderExport(i) {
     const ph = S.photos[i];
