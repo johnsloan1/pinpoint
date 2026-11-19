@@ -23,7 +23,6 @@
     <div class="actions">
       <label class="btn primary" title="Add photos. They're sorted into properties automatically (by folder, file name and GPS).">Add photos<input type="file" id="fileInput" accept="image/jpeg,.jpg,.jpeg" multiple hidden></label>
       <label class="btn" title="Add a folder of photos. Each subfolder (named by address) becomes its own property.">Add folder<input type="file" id="folderInput" webkitdirectory multiple hidden></label>
-      <button class="btn" id="btnDropbox" title="Open shoots straight from your Dropbox; finished photos are saved back to a “callouts” folder">Dropbox</button>
       <span class="sep"></span>
       <button class="btn icon" id="btnUndo" title="Undo (⌘Z)" disabled>↶</button>
       <button class="btn icon" id="btnRedo" title="Redo (⇧⌘Z)" disabled>↷</button>
@@ -93,7 +92,6 @@
               <button class="btn primary big" type="button" id="emptyAddPhotos">Add photos</button>
               <button class="btn big" type="button" id="emptyAddFolder">Add folder</button>
             </div>
-            <button class="btn subtle" type="button" id="emptyDropbox">Open from Dropbox</button>
             <p>Photos or whole folders, from one property or several. They're sorted into properties by folder name, file name (like “123 Main St 03.jpg”) and GPS, and the address is found for you.</p>
             <p>Export from Lightroom with <b>Metadata: All Metadata</b> so the camera direction is kept.</p>
           </div>
@@ -136,16 +134,8 @@
     </form>
   </dialog>
 
-  <dialog id="dbxDlg" class="dlg dlg-wide">
-    <form method="dialog" class="dlg-inner">
-      <div class="row between"><h3>Dropbox</h3><button class="btn icon" value="close" aria-label="Close">✕</button></div>
-      <div id="dbxBody"></div>
-    </form>
-  </dialog>
-
   <div id="busy" class="busy" hidden><div class="busy-card"><div class="spinner"></div><div id="busyText">Working…</div></div></div>
 
-  <script src="js/dropbox.js"></script>
   <script src="js/icons.js"></script>
   <script src="js/metadata.js"></script>
   <script src="js/projection.js"></script>

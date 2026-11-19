@@ -312,7 +312,7 @@
     if (opts.maskPreview) ctx.drawImage(opts.maskPreview, 0, 0, W, H);
     for (const it of items) drawLine(ctx, it, style, u);
     for (const it of items) drawDot(ctx, it, style, u);
-    if (scene.house && style.showPin) drawPin(ctx, scene.house.x, scene.house.y, style, u);
+    if (scene.house && scene.showPin) drawPin(ctx, scene.house.x, scene.house.y, style, u);
     for (const it of items) drawBox(ctx, it, style, u, opts.logoImages || new Map());
     if (scene.notes && scene.notes.length) drawNotes(ctx, scene.notes, style, W, H, u);
     if (opts.lotHandles && scene.lot && !scene.lotLines) drawLotGuide(ctx, scene.lot, opts.handleR || 7 * u);
