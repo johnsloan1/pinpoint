@@ -293,7 +293,6 @@ body.dropping .canvas-wrap { outline: 3px dashed var(--accent); outline-offset: 
 .row.end { justify-content: flex-end; }
 
 /* Start screen buttons */
-.empty-actions { display: flex; gap: 10px; justify-content: center; margin: 18px 0 10px; }
 .btn.big { padding: 10px 22px; font-size: 15px; font-weight: 700; border-radius: 10px; }
 .empty-card .btn.subtle { margin-bottom: 14px; }
 

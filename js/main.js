@@ -1861,7 +1861,7 @@
 
   // Altitude slider position (0–1000) <-> feet. Squared so the first part
   // of the slider moves in small steps and the far end covers big heights.
-  const ALT_MIN = 3, ALT_MAX = 1500;
+  const ALT_MIN = 3, ALT_MAX = 3000;
   const altFt = (pos) => Math.round(ALT_MIN + (ALT_MAX - ALT_MIN) * (pos / 1000) ** 2);
   const altPos = (ft) => Math.round(1000 * Math.sqrt(Math.min(1, Math.max(0, (ft - ALT_MIN) / (ALT_MAX - ALT_MIN)))));
 
@@ -1875,7 +1875,7 @@
       return `<div class="field"><div class="row between"><label>${label}</label><output>${fmt(shown)}${opts.unit || ''}</output></div>
         <input type="range" data-path="${path}" data-type="num" data-scale="${k}" data-unit="${opts.unit || ''}" data-dec="${step < 1 ? (step < 0.1 ? 2 : 1) : 0}" min="${min}" max="${max}" step="${step}" value="${shown}"></div>`;
     },
-    // Drone altitude: a slider that's finer at low heights (3 ft to 1,500 ft),
+    // Drone altitude: a slider that's finer at low heights (3 ft to 3,000 ft),
     // a number box for an exact value, the photo's own reading and a button
     // to go back to it.
     altitude(path, reading, fallback) {
@@ -1884,7 +1884,7 @@
       const pos = altPos(ft);
       const changed = reading != null && Math.abs(ft - Math.round(reading / FT)) >= 1;
       return `<div class="field alt-field"><div class="row between"><label>Altitude (height above the house)</label>
-          <span class="row"><input type="number" class="alt-num" data-path="${path}" data-type="num" data-scale="${FT}" min="${ALT_MIN}" max="5000" step="1" value="${ft}"> ft</span></div>
+          <span class="row"><input type="number" class="alt-num" data-path="${path}" data-type="num" data-scale="${FT}" min="${ALT_MIN}" max="10000" step="1" value="${ft}"> ft</span></div>
         <input type="range" class="alt-range" data-path="${path}" data-type="alt" min="0" max="1000" step="1" value="${pos}">
         <div class="row between alt-reading"><span class="hint">${reading != null ? `Photo says: <b>${Math.round(reading / FT)} ft</b>${changed ? ' (you changed it)' : ''}` : 'This photo has no altitude reading.'}</span>
           ${reading != null ? `<button class="btn small subtle" data-act="alt-photo" data-path="${path}" ${changed ? '' : 'disabled'}>Use photo’s reading</button>` : ''}</div></div>`;

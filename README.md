@@ -56,7 +56,7 @@ hosted version behaves.)
      drift a few degrees), drag the pin onto the house, then use **Camera →
      Line up using the house pin**.
    - **Altitude** (Camera tab): shows what the photo says ("Photo says:
-     210 ft") and lets you change it, 3 ft to 1,500 ft with the slider
+     210 ft") and lets you change it, 3 ft to 3,000 ft with the slider
      (finer steps at low heights) or any exact number in the box. The
      drone measures from where it *took off*, so if you launched from
      higher or lower ground than the house, set the height above the
