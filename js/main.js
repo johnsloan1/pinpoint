@@ -1859,6 +1859,12 @@
     if (v === null || v === '') delete o[key]; else o[key] = v;
   }
 
+  // Altitude slider position (0–1000) <-> feet. Squared so the first part
+  // of the slider moves in small steps and the far end covers big heights.
+  const ALT_MIN = 3, ALT_MAX = 1500;
+  const altFt = (pos) => Math.round(ALT_MIN + (ALT_MAX - ALT_MIN) * (pos / 1000) ** 2);
+  const altPos = (ft) => Math.round(1000 * Math.sqrt(Math.min(1, Math.max(0, (ft - ALT_MIN) / (ALT_MAX - ALT_MIN)))));
+
   const ui = {
     range(label, path, min, max, step, opts = {}) {
       const k = opts.scale || 1;
@@ -1868,6 +1874,20 @@
       const fmt = opts.fmt || ((x) => (+x).toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0));
       return `<div class="field"><div class="row between"><label>${label}</label><output>${fmt(shown)}${opts.unit || ''}</output></div>
         <input type="range" data-path="${path}" data-type="num" data-scale="${k}" data-unit="${opts.unit || ''}" data-dec="${step < 1 ? (step < 0.1 ? 2 : 1) : 0}" min="${min}" max="${max}" step="${step}" value="${shown}"></div>`;
+    },
+    // Drone altitude: a slider that's finer at low heights (3 ft to 1,500 ft),
+    // a number box for an exact value, the photo's own reading and a button
+    // to go back to it.
+    altitude(path, reading, fallback) {
+      const v = getPath(path) ?? reading ?? fallback;
+      const ft = Math.round(v / FT);
+      const pos = altPos(ft);
+      const changed = reading != null && Math.abs(ft - Math.round(reading / FT)) >= 1;
+      return `<div class="field alt-field"><div class="row between"><label>Altitude (height above the house)</label>
+          <span class="row"><input type="number" class="alt-num" data-path="${path}" data-type="num" data-scale="${FT}" min="${ALT_MIN}" max="5000" step="1" value="${ft}"> ft</span></div>
+        <input type="range" class="alt-range" data-path="${path}" data-type="alt" min="0" max="1000" step="1" value="${pos}">
+        <div class="row between alt-reading"><span class="hint">${reading != null ? `Photo says: <b>${Math.round(reading / FT)} ft</b>${changed ? ' (you changed it)' : ''}` : 'This photo has no altitude reading.'}</span>
+          ${reading != null ? `<button class="btn small subtle" data-act="alt-photo" data-path="${path}" ${changed ? '' : 'disabled'}>Use photo’s reading</button>` : ''}</div></div>`;
     },
     color(label, path, fallback, resettable) {
       const v = getPath(path) || fallback;
@@ -2063,6 +2083,36 @@
       </div>`;
   }
 
+  // Compare the drone's sea-level reading with the ground at the house
+  // (USGS). Takeoff ground = sea-level altitude − height above takeoff.
+  // If that's well above or below the house, the height reading is off by
+  // about the difference. Drone sea-level readings can themselves be off by
+  // tens of feet, so this is a hint with a button, never applied silently.
+  const groundAt = {}; // "lat,lon" -> meters | null | 'loading'
+  function altitudeCheck(ph) {
+    const m = ph.meta;
+    const spot = S.house || (m.hasGps ? { lat: m.lat, lon: m.lon } : null);
+    if (m.absAlt == null || m.relAlt == null || !spot) return '';
+    const key = spot.lat.toFixed(5) + ',' + spot.lon.toFixed(5);
+    if (!(key in groundAt)) {
+      groundAt[key] = 'loading';
+      SV.groundElevation(spot.lat, spot.lon).then((v) => { groundAt[key] = v; if (photo() === ph) renderInspector(); });
+    }
+    const g = groundAt[key];
+    if (g === 'loading') return '<p class="hint">Checking the ground height at the house…</p>';
+    if (g == null) return '';
+    const where = S.house ? 'the house' : 'the drone’s spot';
+    const takeoff = m.absAlt - m.relAlt;      // meters above sea level
+    const diffFt = Math.round((takeoff - g) / FT);
+    const estFt = Math.round((m.absAlt - g) / FT);
+    const groundFt = Math.round(g / FT);
+    if (estFt < 3 || Math.abs(diffFt) > 1500) return `<p class="hint">The drone’s sea-level reading (${Math.round(m.absAlt / FT)} ft) doesn’t fit the ground at ${where} (${groundFt} ft), so it can’t help check the height here.</p>`;
+    if (Math.abs(diffFt) < 25) return `<p class="hint">✓ Takeoff spot and ${where} look about level (ground ${groundFt} ft above sea level), so the photo’s reading should be close.</p>`;
+    return `<div class="note warn">Your takeoff spot looks about <b>${Math.abs(diffFt)} ft ${diffFt > 0 ? 'higher' : 'lower'}</b> than the ground at ${where}. That would put the drone about <b>${estFt} ft</b> above ${where}, not ${Math.round(m.relAlt / FT)} ft.
+      <br><span class="hint">Based on the drone’s sea-level reading and USGS ground height. Drone sea-level readings can be off by 30 ft or more, so check the callouts after.</span>
+      <div class="btn-col"><button class="btn small" data-act="alt-set" data-m="${(estFt * FT).toFixed(4)}">Use ${estFt} ft</button></div></div>`;
+  }
+
   function cameraTab() {
     const ph = photo();
     if (!ph) return '<div class="hint-card"><p>Add a photo to see its camera information.</p></div>';
@@ -2077,6 +2127,7 @@
         <dl class="facts">
           <dt>Camera</dt><dd>${esc([m.make, m.model].filter(Boolean).join(' ') || '—')}</dd>
           <dt>Height above takeoff</dt><dd>${ft(m.relAlt)}</dd>
+          ${m.absAlt != null ? `<dt>Height above sea level</dt><dd>${ft(m.absAlt)} <span class="hint">(rough)</span></dd>` : ''}
           <dt>Facing</dt><dd>${m.yaw != null ? ((PJ.baseYaw(ph) + 360) % 360).toFixed(1) + '° ' + compass(PJ.baseYaw(ph)) : '—'}</dd>
           <dt>Tilt</dt><dd>${m.pitch != null ? m.pitch.toFixed(1) + '°' : '—'}</dd>
           <dt>Lens (35mm equiv.)</dt><dd>${m.f35 ? m.f35 + ' mm' : '24 mm (assumed)'}</dd>
@@ -2099,20 +2150,23 @@
         <p class="hint">Your choice is remembered for this camera (${esc(m.model || 'unknown model')}).</p>`;
     }
     if (!manual) {
-      html += `<h3 class="sec">Fine-tune</h3>
+      html += `<h3 class="sec">Altitude</h3>
+        ${ui.altitude('adj.height', m.relAlt, 60)}
+        <p class="hint">The drone measures height from where it <b>took off</b>, not from the ground under it. If you took off from higher or lower ground than the house (a hill, a raised driveway, down the street), set the height above the house here. Too low a height pushes far-away callouts toward the horizon; too high pulls them closer.</p>
+        ${altitudeCheck(ph)}
+        <h3 class="sec">Fine-tune</h3>
         <p class="hint">Drone compasses can be off by a few degrees. Easiest fix: drag the house pin onto the house, and drag the dots of two or three callouts you can see clearly (a school building, a lake) onto the right spots. Then click <b>Line up</b> below.</p>
         ${ui.range('Turn left / right', 'adj.dYaw', -45, 45, 0.1, { unit: '°' })}
         ${ui.range('Tilt up / down', 'adj.dPitch', -15, 15, 0.1, { unit: '°' })}
         ${ui.range('Level', 'adj.dRoll', -10, 10, 0.1, { unit: '°' })}
         ${ui.range('Lens zoom', 'adj.zoom', 0.6, 1.6, 0.005, { fmt: (x) => (+x).toFixed(3) + '×' })}
-        ${ui.range('Height', 'adj.height', 3, 400, 1, { scale: FT, unit: ' ft', fallback: m.relAlt ?? 60, fmt: (x) => Math.round(x) })}
         ${ui.check('Set the camera by hand instead', 'adj.manual')}`;
     } else {
       html += `<h3 class="sec">Camera by hand</h3>
         <p class="hint">Move these until the house pin and a landmark you recognise line up. Then use <b>Copy to all photos</b> if the other shots were taken from the same spot.</p>
         ${ui.range('Facing (compass)', 'adj.mYaw', 0, 360, 0.5, { unit: '°', fmt: (x) => (+x).toFixed(1) })}
         ${ui.range('Tilt', 'adj.mPitch', -90, 0, 0.1, { unit: '°' })}
-        ${ui.range('Height', 'adj.mHeight', 3, 400, 1, { scale: FT, unit: ' ft', fmt: (x) => Math.round(x) })}
+        ${ui.altitude('adj.mHeight', m.relAlt, 61)}
         ${m.hasGps ? '' : ui.range('Drone distance from house', 'adj.mDist', 0, 3000, 5, { scale: FT, unit: ' ft', fmt: (x) => Math.round(x) })
           + ui.range('Drone direction from house', 'adj.mBearing', 0, 360, 1, { unit: '°', fmt: (x) => Math.round(x) + '° ' + compass(+x) })}
         ${ui.range('Level', 'adj.dRoll', -10, 10, 0.1, { unit: '°' })}
@@ -2208,7 +2262,8 @@
     const t = e.target;
     if (!t.dataset.path || t.type === 'text') return;
     applyInput(t);
-    if (t.type === 'range') {
+    if (t.closest('.alt-field')) syncAltitude(t);
+    else if (t.type === 'range') {
       const out = t.parentElement.querySelector('output');
       const dec = +t.dataset.dec;
       if (out) out.textContent = formatOut(t, dec);
@@ -2216,6 +2271,13 @@
     if (t.dataset.path.startsWith('style.font')) ensureFont().then(redraw);
     redraw();
   });
+  // Keep the altitude slider and number box showing the same height.
+  function syncAltitude(t) {
+    const f = t.closest('.alt-field');
+    const ft = Math.round(getPath(t.dataset.path) / FT);
+    if (t.type === 'range') f.querySelector('.alt-num').value = ft;
+    else f.querySelector('.alt-range').value = altPos(ft);
+  }
   function formatOut(t, dec) {
     const v = +t.value, unit = t.dataset.unit || '';
     if (t.dataset.path === 'adj.zoom') return v.toFixed(3) + '×';
@@ -2227,7 +2289,12 @@
     const type = t.dataset.type;
     let v;
     if (type === 'bool') v = t.checked;
-    else if (type === 'num') v = parseFloat(t.value) * (parseFloat(t.dataset.scale) || 1);
+    else if (type === 'alt') v = altFt(+t.value) * FT;
+    else if (type === 'num') {
+      v = parseFloat(t.value) * (parseFloat(t.dataset.scale) || 1);
+      if (!isFinite(v)) return; // half-typed number box
+      if (t.classList.contains('alt-num')) v = Math.max(ALT_MIN * FT, v);
+    }
     else v = t.value;
     if (type === 'bool' && !v && t.dataset.path.startsWith('place.')) v = null;
     setPath(t.dataset.path, v);
@@ -2247,7 +2314,7 @@
       commit();
       const keepFocus = t.type === 'range';
       redraw(); renderSidebar(); renderFilmstrip();
-      if (!keepFocus || /^(style\.(boxStyle|dotColorMode|borderWidth|schoolNote|showLot|lotNote|popSky)|adj\.manual|lot\.(lines|pop))$/.test(t.dataset.path)) renderInspector();
+      if (!keepFocus || /^(style\.(boxStyle|dotColorMode|borderWidth|schoolNote|showLot|lotNote|popSky)|adj\.manual|lot\.(lines|pop))$/.test(t.dataset.path) || t.closest('.alt-field')) renderInspector();
       maybeFetchDrive();
       return;
     }
@@ -2280,6 +2347,12 @@
     const p = sel && sel.kind === 'place' ? S.places[sel.id] : null;
     switch (t.dataset.act) {
       case 'reset': setPath(t.dataset.path, null); break;
+      case 'alt-set': if (ph) ph.adj.height = +t.dataset.m; break;
+      case 'alt-photo':
+        // Automatic mode falls back to the photo's reading when unset; by-hand mode needs the value.
+        if (t.dataset.path === 'adj.height') setPath('adj.height', null);
+        else if (ph && ph.meta.relAlt != null) setPath(t.dataset.path, ph.meta.relAlt);
+        break;
       case 'place-icon':
         openIconPicker(p.icon || catById(p.cat).icon, (key) => { p.icon = key; rememberIcon(p, key); commit(); renderAll(); }, pickCtx(p));
         return;

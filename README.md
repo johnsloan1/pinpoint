@@ -55,6 +55,16 @@ hosted version behaves.)
      click the house. If *everything* is slightly off (drone compasses
      drift a few degrees), drag the pin onto the house, then use **Camera →
      Line up using the house pin**.
+   - **Altitude** (Camera tab): shows what the photo says ("Photo says:
+     210 ft") and lets you change it, 3 ft to 1,500 ft with the slider
+     (finer steps at low heights) or any exact number in the box. The
+     drone measures from where it *took off*, so if you launched from
+     higher or lower ground than the house, set the height above the
+     house. When the photo has a sea-level reading, the app compares it
+     with the USGS ground height at the house and suggests a corrected
+     height. **Use photo's reading** goes back to the original. Callouts
+     move as you drag; ⌘Z undoes; Reset camera settings / Reset all
+     changes on this photo reset it too.
    - Click a callout (or **⋯** in the list) to change text, icon and colors.
    - **Reset all changes on this photo** (Edit tab with nothing selected, or
      Camera tab) puts the camera, pin, callout positions, shown/hidden places,

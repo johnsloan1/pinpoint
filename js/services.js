@@ -139,5 +139,20 @@
     },
   };
 
-  DT.services = {geocode, geocodeNear, reverseGeocode, searchPlaces, routing, store };
+  // ---- Ground height above sea level (USGS, free, US only) ----
+  // Returns meters, or null if unknown. Remembered per spot.
+  const elevCache = new Map();
+  function groundElevation(lat, lon) {
+    const key = lat.toFixed(5) + ',' + lon.toFixed(5);
+    if (!elevCache.has(key)) {
+      const url = 'https://epqs.nationalmap.gov/v1/json?' + new URLSearchParams({ x: lon, y: lat, units: 'Meters', wkid: 4326 });
+      elevCache.set(key, fetch(url).then(r => r.ok ? r.json() : null).then(j => {
+        const v = j && parseFloat(j.value);
+        return isFinite(v) && v > -500 ? v : null;
+      }).catch(() => { elevCache.delete(key); return null; }));
+    }
+    return elevCache.get(key);
+  }
+
+  DT.services = {geocode, groundElevation, geocodeNear, reverseGeocode, searchPlaces, routing, store };
 })(window.DT = window.DT || {});

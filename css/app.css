@@ -68,6 +68,9 @@ input[type=text], select {
 }
 input[type=text]:focus, select:focus { outline: none; border-color: var(--accent); }
 input[type=range] { width: 100%; accent-color: var(--accent); }
+.alt-field .alt-num { width: 76px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: #0d0f12; color: inherit; text-align: right; font: inherit; }
+.alt-field .alt-num:focus { outline: none; border-color: var(--accent); }
+.alt-reading { gap: 6px; }
 input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; flex: none; }
 input[type=color] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: none; cursor: pointer; }
 output { color: var(--muted); font-variant-numeric: tabular-nums; }
