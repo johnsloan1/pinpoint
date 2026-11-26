@@ -100,6 +100,10 @@
   // heading was within ~4°. A choice you make is remembered per camera.
   // (Stored under a new name so older remembered "gimbal" choices are dropped.)
   let cameraPrefs = {};
+  // Drone names for the camera model in the photo's data. Add a line here
+  // for each new drone, e.g. if it ever needs its own settings.
+  const DRONE_NAMES = { 'L3D-100c': 'DJI Mavic 4 Pro' };
+  const droneName = (m) => DRONE_NAMES[m.model] || [m.make, m.model].filter(Boolean).join(' ');
   function defaultHeading(meta) {
     const model = meta.model || '';
     if (cameraPrefs[model]) return cameraPrefs[model];
@@ -2121,7 +2125,7 @@
     if (m.hasDirection) {
       html += `<div class="note ok"><b>✓ Camera-direction data found.</b> Callouts are placed automatically from this photo’s GPS, height and gimbal angles.</div>
         <dl class="facts">
-          <dt>Camera</dt><dd>${esc([m.make, m.model].filter(Boolean).join(' ') || '—')}</dd>
+          <dt>Drone</dt><dd>${esc(droneName(m) || '—')}${DRONE_NAMES[m.model] ? ` <span class="hint">(${esc(m.model)})</span>` : ''}</dd>
           <dt>Height above takeoff</dt><dd>${ft(m.relAlt)}</dd>
           ${m.absAlt != null ? `<dt>Height above sea level</dt><dd>${ft(m.absAlt)} <span class="hint">(rough)</span></dd>` : ''}
           <dt>Facing</dt><dd>${m.yaw != null ? ((PJ.baseYaw(ph) + 360) % 360).toFixed(1) + '° ' + compass(PJ.baseYaw(ph)) : '—'}</dd>
@@ -2143,7 +2147,7 @@
       html += `<h3 class="sec">Compass reading</h3>
         ${gap > 8 ? `<div class="note warn">This photo’s two compass readings disagree by <b>${gap.toFixed(0)}°</b>. If all callouts look turned sideways, switch to the other one.</div>` : ''}
         ${ui.select('Trust the heading from', 'adj.heading', [['gimbal', `Camera gimbal (${deg(m.yaw)})`], ['body', `Drone body (${deg(m.flightYaw)})`]])}
-        <p class="hint">Your choice is remembered for this camera (${esc(m.model || 'unknown model')}).</p>`;
+        <p class="hint">Your choice is remembered for this drone (${esc(droneName(m) || 'unknown model')}).</p>`;
     }
     if (!manual) {
       html += `<h3 class="sec">Altitude</h3>
