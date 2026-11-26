@@ -1062,16 +1062,9 @@
       canvas.style.cursor = view.z > 1 ? 'grab' : 'default';
       return;
     }
-    if (drag && drag.moved && drag.hit.type === 'dot') {
-      const p = S.places[drag.hit.id], ph = drag.ph, lay = ph.layout[drag.hit.id];
-      const cam = p && (p.source === 'mine' || (p.source === 'custom' && p.lat != null)) && camFor(ph);
-      const ll = cam && lay && lay.anchor && PJ.unproject(cam, lay.anchor.x * ph.W, lay.anchor.y * ph.H);
-      if (ll) {
-        p.lat = ll.lat; p.lon = ll.lon; p.route = { lat: ll.lat, lon: ll.lon };
-        if (S.house) p.distMi = PJ.distM(S.house.lat, S.house.lon, ll.lat, ll.lon) / MI;
-        for (const x of S.photos) if (x.layout[p.id]) delete x.layout[p.id].anchor;
-      }
-    }
+    // A dragged dot stays on this photo only. (It used to move the place's
+    // map location for every photo, but drone readings are off by a
+    // different amount in each shot, so a fix here was wrong elsewhere.)
     if (drag && drag.moved) { commit(); renderInspector(); }
     drag = null;
     canvas.style.cursor = 'default';

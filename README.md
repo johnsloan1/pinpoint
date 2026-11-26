@@ -109,8 +109,8 @@ hosted version behaves.)
 
 **Several photos from one flight:** set up the callouts once. Every photo
 uses its own camera position, so each one is placed correctly. Your text,
-icon and color edits apply to all photos. Box positions you drag are kept
-per photo.
+icon and color edits apply to all photos. Boxes and dots you drag are kept
+per photo: moving a dot on one photo never moves it on another.
 
 **The app remembers your work on places:**
 - **My places:** a callout you add by clicking the photo is saved to *My
