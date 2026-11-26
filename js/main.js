@@ -28,7 +28,7 @@
   const clone = (o) => JSON.parse(JSON.stringify(o));
   function newProject() {
     return { app: 'drone-tag', version: 1, address: '', house: null, categories: clone(PL.DEFAULT_CATEGORIES),
-      places: {}, photos: [], style: clone(DEFAULT_STYLE), master: 3, fetched: null };
+      places: {}, photos: [], style: clone(DEFAULT_STYLE), master: 3, fetched: null, bodyHeadingV2: true };
   }
 
   // ---------------- State ----------------
@@ -94,15 +94,16 @@
   }
 
   // ---------------- Photos ----------------
-  // Which compass reading to trust, per camera model. Your choice is
-  // remembered; L3D-100c starts on "drone body" because its gimbal heading
-  // was ~26° off in a test photo (Nov 2026).
-  const BODY_HEADING_MODELS = ['L3D-100c'];
+  // Which compass reading to trust, per camera model. Every drone starts on
+  // "drone body": the camera faces where the drone faces, and the gimbal's
+  // own heading was 19–26° off in test photos (Nov 2026) while the body
+  // heading was within ~4°. A choice you make is remembered per camera.
+  // (Stored under a new name so older remembered "gimbal" choices are dropped.)
   let cameraPrefs = {};
   function defaultHeading(meta) {
     const model = meta.model || '';
     if (cameraPrefs[model]) return cameraPrefs[model];
-    return BODY_HEADING_MODELS.includes(model) && meta.flightYaw != null ? 'body' : 'gimbal';
+    return meta.flightYaw != null ? 'body' : 'gimbal';
   }
 
   function newPhoto(name, W, H, meta) {
@@ -665,6 +666,8 @@
     const pinWas = S.style.showPin;
     delete S.style.showPin;
     for (const p of S.photos) if (p.pin === undefined) p.pin = pinWas !== false;
+    // Nov 2026: switch saved photos to the drone-body heading once.
+    if (!S.bodyHeadingV2) { for (const p of S.photos) if (p.meta && p.meta.flightYaw != null && p.adj) p.adj.heading = 'body'; S.bodyHeadingV2 = true; }
     // Lot lines used to be shared by every photo of a property (Nov 2026).
     if (S.lot) {
       if (S.style.showLot) for (const p of S.photos) if (!p.ground && !p.lot) p.lot = clone(S.lot);
@@ -2300,7 +2303,7 @@
       if (t.dataset.path === 'adj.heading') {
         const model = photo().meta.model || '';
         cameraPrefs[model] = t.value;
-        SV.store.save('cameraPrefs', cameraPrefs);
+        SV.store.save('cameraPrefs2', cameraPrefs);
         for (const x of S.photos) if ((x.meta.model || '') === model) x.adj.heading = t.value;
       }
       if (t.dataset.path.startsWith('style.font')) ensureFont().then(redraw);
@@ -3110,7 +3113,7 @@
       if (typesChanged) SV.store.save('placeTypes', placeTypes);
       if (mineChanged) SV.store.save('myPlaces', myPlaces);
     }
-    cameraPrefs = await SV.store.load('cameraPrefs', {}) || {};
+    cameraPrefs = await SV.store.load('cameraPrefs2', {}) || {};
     applyPlaceTypes();
     const d = await SV.store.load('defaultPreset', null);
     defaultPresetCache = d;
