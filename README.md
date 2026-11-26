@@ -113,6 +113,9 @@ icon and color edits apply to all photos. Boxes and dots you drag are kept
 per photo: moving a dot on one photo never moves it on another.
 
 **The app remembers your work on places:**
+- **Distance sliders:** the main "within" slider and each category's
+  slider start where you last left them on every new property. (A saved
+  job or a preset you load keeps its own distances.)
 - **My places:** a callout you add by clicking the photo is saved to *My
   places* (Presets & logos tab) and appears automatically on any future job
   within range. Pick its category (e.g. Neighborhood amenities). Drag its dot

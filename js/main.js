@@ -149,6 +149,7 @@
       const keep = S;
       S = newProject();
       if (defaultPresetCache) { const ss = setStatus; setStatus = () => {}; try { applyPreset(defaultPresetCache); } finally { setStatus = ss; } } else applyPlaceTypes();
+      applyDistances();
       st = S; S = keep;
     }
     st.jobId = st.jobId || jobId();
@@ -1810,7 +1811,7 @@
     switch (t.dataset.act) {
       case 'cat-toggle': cat.enabled = t.checked; if (cat.enabled) { cat.open = true; maybeRefetch(); } break;
       case 'cat-major': cat.majorOnly = t.checked; break;
-      case 'cat-dist': cat.maxMi = parseFloat(t.value); maybeRefetch(); break;
+      case 'cat-dist': cat.maxMi = parseFloat(t.value); rememberDist([cat]); maybeRefetch(); break;
       case 'place-toggle':
         if (sideView === 'photo' && photo()) setShownOn(p, photo(), t.checked); else p.enabled = t.checked;
         break;
@@ -2304,6 +2305,7 @@
     if (t.dataset.path) {
       applyInput(t);
       if (t.dataset.path === 'place.maxMi' || t.dataset.path === 'cat.maxMi') maybeRefetch();
+      if (t.dataset.path === 'cat.maxMi' && sel && sel.kind === 'cat') rememberDist([catById(sel.id)]);
       if (t.dataset.path === 'adj.heading') {
         const model = photo().meta.model || '';
         cameraPrefs[model] = t.value;
@@ -2558,6 +2560,19 @@
       if (t.minAcres && c.minAcres !== undefined) c.minAcres = t.minAcres;
     }
     applyCatOrder();
+  }
+  // Distance sliders are remembered for every new job: the main "within"
+  // slider and each category's own slider. (Saved jobs and presets you load
+  // keep their own distances.)
+  let distMem = { master: null, cats: {} };
+  function rememberDist(cats, master) {
+    for (const c of cats) if (c && c.id !== 'custom') distMem.cats[c.id] = c.maxMi;
+    if (master != null) distMem.master = master;
+    SV.store.save('distances', distMem);
+  }
+  function applyDistances() {
+    if (distMem.master != null) S.master = distMem.master;
+    for (const c of S.categories) if (c.id !== 'custom' && distMem.cats[c.id] != null) c.maxMi = distMem.cats[c.id];
   }
   function renderTypes() {
     $('#typesBody').innerHTML = S.categories.filter(c => c.id !== 'custom' && !c.user).map(c => {
@@ -2814,7 +2829,7 @@
     redraw();
     renderSidebar();
   });
-  $('#master').addEventListener('change', () => { commit(); maybeRefetch(); renderAll(); });
+  $('#master').addEventListener('change', () => { rememberDist(S.categories.filter(c => c.id !== 'custom' && !c.rangeMax), S.master); commit(); maybeRefetch(); renderAll(); });
   $('#showDrive').addEventListener('change', (e) => { S.style.showDrive = e.target.checked; for (const p of Object.values(S.places)) delete p.driveFailed; commit(); renderAll(); });
   $('#driveMode').addEventListener('change', (e) => { S.style.driveMode = e.target.value; commit(); renderAll(); });
   $('#btnFind').addEventListener('click', findPlaces);
@@ -3097,6 +3112,7 @@
     await loadLogos();
     placeTypes = await SV.store.load('placeTypes', {}) || {};
     catOrder = await SV.store.load('catOrder', []) || [];
+    distMem = { master: null, cats: {}, ...(await SV.store.load('distances', null) || {}) };
     placeMem = await SV.store.load('placeMemory', null);
     if (!placeMem) { // older versions only remembered icons
       placeMem = {};
